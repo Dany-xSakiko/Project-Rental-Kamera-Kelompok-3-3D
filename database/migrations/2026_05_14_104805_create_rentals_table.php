@@ -10,31 +10,13 @@ return new class extends Migration
     {
         Schema::create('rentals', function (Blueprint $table) {
             $table->id();
-
-            $table->foreignId('user_id')
-                ->constrained()
-                ->onDelete('cascade');
-
-            $table->foreignId('camera_id')
-                ->constrained()
-                ->onDelete('cascade');
-
-            $table->date('rent_date');
-
-            $table->date('return_due');
-
-            $table->date('return_date')->nullable();
-
-            $table->decimal('total_price', 10, 2)->default(0);
-
-            $table->decimal('fine', 10, 2)->default(0);
-
-            $table->enum('status', [
-                'pending',
-                'borrowed',
-                'returned'
-            ])->default('pending');
-
+            $table->string('booking_code')->unique(); 
+            $table->foreignId('user_id')->constrained('users')->onDelete('cascade');
+            $table->date('start_date');
+            $table->date('end_date');
+            $table->integer('total_days');
+            $table->integer('total_price');
+            $table->enum('status', ['Menunggu Pembayaran', 'Aktif / Disewa', 'Selesai', 'Dibatalkan'])->default('Menunggu Pembayaran');
             $table->timestamps();
         });
     }
@@ -43,4 +25,4 @@ return new class extends Migration
     {
         Schema::dropIfExists('rentals');
     }
-};                                                                                                                                              
+};

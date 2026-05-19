@@ -10,19 +10,10 @@ return new class extends Migration
     {
         Schema::create('rental_items', function (Blueprint $table) {
             $table->id();
-
-            $table->foreignId('rental_id')
-                ->constrained()
-                ->onDelete('cascade');
-
-            $table->foreignId('equipment_id')
-                ->constrained('equipments')
-                ->onDelete('cascade');
-
-            $table->integer('quantity')->default(1);
-
-            $table->decimal('subtotal', 10, 2)->default(0);
-
+            $table->foreignId('rental_id')->constrained('rentals')->onDelete('cascade');
+            $table->foreignId('camera_id')->nullable()->constrained('cameras')->onDelete('set null');
+            $table->foreignId('equipment_id')->nullable()->constrained('equipments')->onDelete('set null');
+            $table->integer('price_per_day');
             $table->timestamps();
         });
     }
