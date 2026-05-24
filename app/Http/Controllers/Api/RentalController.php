@@ -23,51 +23,45 @@ class RentalController extends Controller
         return response()->json($rentals);
     }
 
-    /**
-     * Store a newly created rental.
-     */
+    /*Store a newly created rental from checkout.*/
     public function store(Request $request)
     {
-        $validated = $request->validate([
-            'user_id' => 'required|exists:users,id',
-            'camera_id' => 'required|exists:cameras,id',
-            'rent_date' => 'required|date',
-            'return_due' => 'required|date',
-            'status' => 'nullable|in:pending,borrowed,returned'
+        $request->validate([
+            'start_date' => 'required|date',
+            'end_date' => 'required|date|after:start_date',
+            'total_days' => 'required|integer|min:1',
+            'total_price' => 'required|integer|min:0',
+            'items' => 'required|array|min:1',
         ]);
 
-        $camera = Camera::findOrFail($validated['camera_id']);
+        // Buat booking code unik
+        $bookingCode = 'YK-' . strtoupper(\Illuminate\Support\Str::random(8));
 
-        if ($camera->stock <= 0) {
-            return response()->json([
-                'message' => 'Camera stock is empty'
-            ], 400);
+        // Simpan ke tabel rentals
+        $rental = Rental::create([
+            'booking_code' => $bookingCode,
+            'user_id' => $request->user()->id,
+            'start_date' => $request->start_date,
+            'end_date' => $request->end_date,
+            'total_days' => $request->total_days,
+            'total_price' => $request->total_price,
+            'status' => 'Menunggu Pembayaran',
+        ]);
+
+        // Simpan items ke tabel rental_items
+        foreach ($request->items as $item) {
+            \App\Models\RentalItem::create([
+                'rental_id' => $rental->id,
+                'camera_id' => $item['camera_id'] ?? null,
+                'equipment_id' => $item['equipment_id'] ?? null,
+                'price_per_day' => $item['price_per_day'],
+            ]);
         }
 
-        $days = now()->parse($validated['rent_date'])
-            ->diffInDays(
-                now()->parse($validated['return_due'])
-            );
-
-        $days = max($days, 1);
-
-        $totalPrice = $camera->price_per_day * $days;
-
-        $rental = Rental::create([
-            'user_id' => $validated['user_id'],
-            'camera_id' => $validated['camera_id'],
-            'rent_date' => $validated['rent_date'],
-            'return_due' => $validated['return_due'],
-            'status' => $validated['status'] ?? 'pending',
-            'total_price' => $totalPrice,
-            'fine' => 0
-        ]);
-
-        $camera->decrement('stock');
-
         return response()->json([
-            'message' => 'Rental created successfully',
-            'data' => $rental
+            'message' => 'Booking berhasil!',
+            'booking_code' => $bookingCode,
+            'rental' => $rental,
         ], 201);
     }
 

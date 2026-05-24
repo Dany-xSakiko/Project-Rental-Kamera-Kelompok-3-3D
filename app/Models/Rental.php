@@ -9,24 +9,18 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Rental extends Model
 {
     protected $fillable = [
+        'booking_code',
         'user_id',
-        'camera_id',
-        'rent_date',
-        'return_due',
-        'return_date',
+        'start_date',
+        'end_date',
+        'total_days',
         'total_price',
-        'fine',
-        'status'
+        'status',
     ];
 
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
-    }
-
-    public function camera(): BelongsTo
-    {
-        return $this->belongsTo(Camera::class);
     }
 
     public function rentalItems(): HasMany

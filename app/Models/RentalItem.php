@@ -9,9 +9,9 @@ class RentalItem extends Model
 {
     protected $fillable = [
         'rental_id',
+        'camera_id',
         'equipment_id',
-        'quantity',
-        'subtotal'
+        'price_per_day',
     ];
 
     public function rental(): BelongsTo
@@ -19,11 +19,13 @@ class RentalItem extends Model
         return $this->belongsTo(Rental::class);
     }
 
+    public function camera(): BelongsTo
+    {
+        return $this->belongsTo(Camera::class);
+    }
+
     public function equipment(): BelongsTo
     {
-        return $this->belongsTo(
-            Equipment::class,
-            'equipment_id'
-        );
+        return $this->belongsTo(Equipment::class);
     }
 }

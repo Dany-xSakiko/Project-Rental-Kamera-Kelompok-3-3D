@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import "../css/app.css"; // Pastikan file app.css berisi SEMUA css dari file aslimu
 import { products } from "./data";
+import axios from "axios";
 
 // --- FORMAT RUPIAH ---
 const rp = (n) => "Rp " + n.toLocaleString("id-ID");
@@ -109,7 +110,42 @@ const Footer = () => (
 
 // --- HALAMAN BERANDA ---
 const HomePage = ({ setActivePage, setSelectedProduct }) => {
-    const hotItems = products.filter((p) => p.hot).slice(0, 4);
+    const [hotItems, setHotItems] = useState([]);
+
+    useEffect(() => {
+        axios.get("/api/katalog-produk")
+            .then(({ data }) => {
+                const cameras = data.cameras.map(c => ({
+                    id:      c.id,
+                    type:    "camera",
+                    brand:   c.brand,
+                    name:    c.name || c.type,
+                    price:   Math.round(c.price_per_day),
+                    deposit: Math.round(c.price_per_day) * 2,
+                    cat:     c.type,
+                    icon:    <img src={`/storage/${c.image}`} alt={c.name} className="hot-card-img"/>,
+                    desc:    c.description,
+                    hot:     true,
+                }));
+
+                const equipments = data.equipments.map(e => ({
+                    id:      e.id,
+                    type:    "equipment",
+                    brand:   e.brand,
+                    name:    e.name,
+                    price:   Math.round(e.price_per_day),
+                    deposit: Math.round(e.price_per_day) * 2,
+                    cat:     "Aksesoris",
+                    icon:    <img src={`/storage/${e.image}`} alt={e.name} className="hot-card-img"/>,
+                    desc:    e.specification,
+                    hot:     false,
+                }));
+
+                // Ambil 4 item pertama yang hot
+                const allHot = [...cameras, ...equipments].filter(p => p.hot);
+            setHotItems(allHot.filter(p => p.name !== "Nikon Z6 II").slice(0, 3));
+            });
+    }, []);
 
     const openProduct = (product) => {
         setSelectedProduct(product);
@@ -202,10 +238,52 @@ const HomePage = ({ setActivePage, setSelectedProduct }) => {
 // --- HALAMAN KATALOG ---
 const CatalogPage = ({ setActivePage, setSelectedProduct }) => {
     const [filter, setFilter] = useState("Semua");
-    const filteredProducts =
-        filter === "Semua"
-            ? products
-            : products.filter((p) => p.cat === filter);
+    const [products, setProducts] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    // Ambil data dari API waktu halaman dibuka
+    useEffect(() => {
+        axios.get("/api/katalog-produk")
+            .then(({ data }) => {
+                // Gabungkan cameras dan equipments
+                const cameras = data.cameras.map(c => ({
+                    id:      c.id,
+                    type:    "camera",
+                    brand:   c.brand,
+                    name:    c.name || c.type, // ← pakai c.name
+                    price:   Math.round(c.price_per_day), // ← bulatkan
+                    deposit: Math.round(c.price_per_day) * 2,
+                    cat:     c.type,
+                    icon:    <img src={`/storage/${c.image}`} alt={c.name} className="camera-card-img"/>,
+                    desc:    c.description,
+                    hot:     true,
+                }));
+
+                const equipments = data.equipments.map(e => ({
+                    id:      e.id,
+                    type:    "equipment",
+                    brand:   e.brand,
+                    name:    e.name,
+                    price:   Math.round(e.price_per_day), // ← bulatkan
+                    deposit: Math.round(e.price_per_day) * 2,
+                    cat:     "Aksesoris",
+                    icon:    <img src={`/storage/${e.image}`} alt={e.name} className="equipment-card-img"/>,
+                    desc:    e.description,
+                    desc:    e.specification,
+                    hot:     false,
+                }));
+
+                setProducts([...cameras, ...equipments]);
+                setLoading(false);
+            })
+            .catch(() => setLoading(false));
+    }, []);
+
+    const filteredProducts = filter === "Semua"
+        ? products
+        : products.filter((p) => p.cat === filter);
+
+    if (loading) return <div style={{ padding: "80px", textAlign: "center" }}>Loading...</div>;
 
     return (
         <div className="page active">
@@ -214,32 +292,22 @@ const CatalogPage = ({ setActivePage, setSelectedProduct }) => {
                     <aside className="sidebar">
                         <div className="sb-section">
                             <div className="sb-title">Kategori</div>
-                            {[
-                                "Semua",
-                                "Mirrorless",
-                                "DSLR",
-                                "Lensa",
-                                "Video",
-                                "Aksesoris",
-                            ].map((cat) => (
+                            {["Semua", "Mirrorless", "DSLR", "Lensa", "Video", "Aksesoris"].map((cat) => (
                                 <div
                                     key={cat}
                                     className="check-row"
                                     onClick={() => setFilter(cat)}
                                     style={{
-                                        fontWeight:
-                                            filter === cat ? "bold" : "normal",
-                                        color:
-                                            filter === cat
-                                                ? "var(--gold)"
-                                                : "inherit",
+                                        fontWeight: filter === cat ? "bold" : "normal",
+                                        color: filter === cat ? "var(--gold)" : "inherit",
+                                        background: filter === cat ? "rgba(200, 146, 42, 0.1)" : "transparent",
                                         cursor: "pointer",
+                                        padding: "8px 10px",
+                                        borderRadius: "6px",
+                                        borderLeft: filter === cat ? "3px solid var(--gold)" : "3px solid transparent",
                                     }}
                                 >
-                                    <label
-                                        className="check-label"
-                                        style={{ cursor: "pointer" }}
-                                    >
+                                    <label className="check-label" style={{ cursor: "pointer" }}>
                                         {cat}
                                     </label>
                                 </div>
@@ -251,7 +319,7 @@ const CatalogPage = ({ setActivePage, setSelectedProduct }) => {
                         <div className="cat-grid">
                             {filteredProducts.map((p) => (
                                 <div
-                                    key={p.id}
+                                    key={p.id + p.type}
                                     className="pcard"
                                     onClick={() => {
                                         setSelectedProduct(p);
@@ -259,22 +327,14 @@ const CatalogPage = ({ setActivePage, setSelectedProduct }) => {
                                     }}
                                 >
                                     <div className="pcard-thumb">
-                                        <div className="pcard-thumb-inner">
-                                            {p.icon}
-                                        </div>
+                                        <div className="pcard-thumb-inner">{p.icon}</div>
                                     </div>
                                     <div className="pcard-body">
-                                        <div className="pcard-brand">
-                                            {p.brand}
-                                        </div>
-                                        <div className="pcard-name">
-                                            {p.name}
-                                        </div>
+                                        <div className="pcard-brand">{p.brand}</div>
+                                        <div className="pcard-name">{p.name}</div>
                                         <div className="pcard-price">
                                             {rp(p.price)}
-                                            <span className="pcard-price-sub">
-                                                /hari
-                                            </span>
+                                            <span className="pcard-price-sub">/hari</span>
                                         </div>
                                     </div>
                                 </div>
@@ -439,8 +499,8 @@ const DetailPage = ({ product, addToCart, setActivePage }) => {
                                         {days > 0
                                             ? rp(
                                                   product.price * days +
-                                                      product.deposit,
-                                              )
+                                                    product.deposit,
+                                                )
                                             : "—"}
                                     </span>
                                 </div>
@@ -466,19 +526,50 @@ const DetailPage = ({ product, addToCart, setActivePage }) => {
 const CartPage = ({ cart, removeFromCart, clearCart, setActivePage }) => {
     // State untuk efek loading saat tombol bayar diklik
     const [isProcessing, setIsProcessing] = useState(false);
+    const [showSuccessModal, setShowSuccessModal] = useState(false);
 
     const totalSewa = cart.reduce((a, c) => a + c.p.price * c.days, 0);
 
     // Fungsi simulasi pembayaran otomatis
-    const handleCheckout = () => {
-        setIsProcessing(true); // Nyalakan animasi loading
+        // Fungsi checkout — kirim data ke API Laravel
+    const handleCheckout = async () => {
+        setIsProcessing(true);
+        try {
+            // Siapkan list item dari keranjang
+            const items = cart.map(item => ({
+                camera_id:     item.p.type === "camera" ? item.p.id : null,
+                equipment_id:  item.p.type === "equipment" ? item.p.id : null,
+                price_per_day: item.p.price,
+            }));
 
-        // Tunggu 1.5 detik (seakan-akan sedang konek ke API bank)
-        setTimeout(() => {
+            // Ambil tanggal dari item pertama di keranjang
+            const start_date  = cart[0].start;
+            const end_date    = cart[0].end;
+            const total_days  = cart[0].days;
+            const total_price = totalSewa;
+
+            // Kirim ke API /api/rentals (butuh token login)
+            await axios.post("/api/rentals", {
+                start_date,
+                end_date,
+                total_days,
+                total_price,
+                items,
+            }, {
+                headers: {
+                    Authorization: "Bearer " + localStorage.getItem("token"),
+                    Accept: "application/json",
+                }
+            });
+
             setIsProcessing(false);
-            clearCart(); // Kosongkan keranjang setelah "bayar"
-            setActivePage("profile"); // Arahkan ke halaman riwayat pesanan
-        }, 1500);
+            clearCart(); // Kosongkan keranjang
+            setShowSuccessModal(true); // Tampilkan popup sukses
+
+        } catch (err) {
+            setIsProcessing(false);
+            alert("❌ " + (err.response?.data?.message || err.message));
+        }
     };
 
     return (
@@ -569,6 +660,32 @@ const CartPage = ({ cart, removeFromCart, clearCart, setActivePage }) => {
                     </div>
                 )}
             </div>
+
+            {/* POPUP SUKSES */}
+            {showSuccessModal && (
+                <div className="modal-overlay">
+                    <div className="modal-box">
+                        <div className="modal-header">
+                            <span>Status Pembayaran</span>
+                            <button
+                                className="modal-close-btn"
+                                onClick={() => { setShowSuccessModal(false); setActivePage("profile"); }}
+                            >✕</button>
+                        </div>
+                        <div className="modal-body">
+                            <div className="modal-success-icon">✅</div>
+                            <div className="modal-title">Pembayaran Berhasil!</div>
+                            <div className="modal-desc">Pembayaran telah berhasil dikonfirmasi.</div>
+                            <button
+                                className="btn btn-gold btn-full"
+                                onClick={() => { setShowSuccessModal(false); setActivePage("home"); }}
+                            >
+                                Selesai
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
@@ -577,41 +694,66 @@ const CartPage = ({ cart, removeFromCart, clearCart, setActivePage }) => {
 const AuthPage = ({ setUser, setActivePage }) => {
     const [isLogin, setIsLogin] = useState(true);
 
-    const handleAuth = (e) => {
-        e.preventDefault();
+    const handleAuth = async (e) => {
+    e.preventDefault();
 
-        // PERBAIKAN: Tambahkan .trim() di sini agar kebal terhadap spasi ekstra
-        const email = e.target.email.value.trim();
-        const password = e.target.password.value;
+    const email    = e.target.email.value.trim();
+    const password = e.target.password.value;
 
+    try {
         if (isLogin) {
-            // 1. Cek apakah yang login adalah Admin?
+            // Cek admin dulu
             if (email === "admin@yukirent.com" && password === "admin123") {
-                alert(
-                    "✦ Berhasil login sebagai Admin. Mengalihkan ke Dashboard...",
-                );
+                alert("✦ Berhasil login sebagai Admin. Mengalihkan ke Dashboard...");
                 window.location.href = "/admin";
                 return;
             }
 
-            // 2. Jika bukan admin, login sebagai Pelanggan Biasa
+            // Login pakai axios
+            const { data } = await axios.post("/api/login", { email, password });
+
+            localStorage.setItem("token", data.token);
             setUser({
-                name: "Yuki Rentaka",
-                email: email,
-                initials: "YK",
+                name:     data.user.name,
+                email:    data.user.email,
+                initials: data.user.name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2),
             });
             setActivePage("home");
+
         } else {
-            // Logika untuk Register
+            const name                  = e.target.fullname.value.trim();
+            const password_confirmation = e.target.password.value;
+
+            // Register pakai axios
+            const { data } = await axios.post("/api/register", {
+                name, email, password, password_confirmation
+            });
+
+            localStorage.setItem("token", data.token);
             setUser({
-                name: "User Baru",
-                email: email,
-                initials: "UB",
+                name:     data.user.name,
+                email:    data.user.email,
+                initials: data.user.name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2),
             });
             alert("🎉 Akun berhasil dibuat!");
             setActivePage("home");
         }
-    };
+
+        } catch (err) {
+        const msg = err.response?.data?.errors?.email?.[0] 
+                || err.response?.data?.message 
+                || err.message 
+                || "Terjadi kesalahan.";
+        
+        // Kalau email sudah terdaftar, arahkan ke login
+        if (msg.includes("already been taken")) {
+            alert("📧 Email sudah terdaftar! Silakan login.");
+            setIsLogin(true); // otomatis pindah ke form login
+        } else {
+            alert("❌ " + msg);
+        }
+    }
+};
 
     return (
         <div
@@ -789,13 +931,50 @@ const ProfilePage = ({ user, setUser, setActivePage }) => {
                         <h3>Pengaturan Akun</h3>
                         <div className="form-group">
                             <label>Nama</label>
-                            <input type="text" defaultValue={user.name} />
+                            <input
+                                type="text"
+                                id="profileName"
+                                defaultValue={user.name}
+                            />
                         </div>
                         <div className="form-group">
                             <label>Email</label>
-                            <input type="email" defaultValue={user.email} />
+                            <input
+                                type="email"
+                                id="profileEmail"
+                                defaultValue={user.email}
+                            />
                         </div>
-                        <button className="btn btn-ink">
+        
+                        <button
+                            className="btn btn-ink"
+                            onClick={async () => {
+                                const name  = document.getElementById("profileName").value.trim();
+                                const email = document.getElementById("profileEmail").value.trim();
+                                try {
+                                    const res = await fetch("/api/profile", {
+                                        method: "PUT",
+                                        headers: {
+                                            "Content-Type": "application/json",
+                                            "Accept": "application/json",
+                                            "Authorization": "Bearer " + localStorage.getItem("token"),
+                                        },
+                                        body: JSON.stringify({ name, email }),
+                                    });
+                                    const data = await res.json();
+                                    if (!res.ok) throw new Error(data.message || "Gagal menyimpan.");
+                                    setUser({
+                                        ...user,
+                                        name:     data.user.name,
+                                        email:    data.user.email,
+                                        initials: data.user.name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2),
+                                    });
+                                    alert("✅ Profil berhasil diperbarui!");
+                                } catch (err) {
+                                    alert("❌ " + err.message);
+                                }
+                            }}
+                        >
                             Simpan Perubahan
                         </button>
                     </div>
@@ -823,7 +1002,7 @@ export default function App() {
 
     // Fungsi Hapus Keranjang
     const removeFromCart = (indexToRemove) => {
-        setCart(cart.filter((_, index) => index !== indexToRemove));
+    setCart(cart.filter((_, index) => index !== indexToRemove));
     };
 
     // 1. FUNGSI BARU: Untuk mengosongkan keranjang setelah dibayar
