@@ -45,7 +45,7 @@ class RentalController extends Controller
             'end_date' => $request->end_date,
             'total_days' => $request->total_days,
             'total_price' => $request->total_price,
-            'status' => 'Menunggu Pembayaran',
+            'status' => 'Aktif / Disewa',
         ]);
 
         // Simpan items ke tabel rental_items
