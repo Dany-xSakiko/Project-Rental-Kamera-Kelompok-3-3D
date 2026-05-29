@@ -23,7 +23,8 @@ class AuthController extends Controller
             'name' => $request->name,
             'email' => $request->email,
             'password' => Hash::make($request->password),
-            'email_verified_at' => now(), // ← tambah ini, auto verified
+            'email_verified_at' => now(),
+            'phone' => $request->phone,
         ]);
 
         $token = $user->createToken('auth_token')->plainTextToken;

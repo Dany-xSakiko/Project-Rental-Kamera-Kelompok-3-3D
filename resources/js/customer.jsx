@@ -722,11 +722,13 @@ const AuthPage = ({ setUser, setActivePage }) => {
 
         } else {
             const name                  = e.target.fullname.value.trim();
+            const phone                 = e.target.phone.value.trim();
             const password_confirmation = e.target.password.value;
 
             // Register pakai axios
             const { data } = await axios.post("/api/register", {
-                name, email, password, password_confirmation
+                name, email, password, password_confirmation,
+                phone
             });
 
             localStorage.setItem("token", data.token);
