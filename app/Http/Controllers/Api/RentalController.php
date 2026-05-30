@@ -4,8 +4,13 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Camera;
+use App\Models\Equipment; // baru
 use App\Models\Rental;
+use App\models\Voucher; 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Carbon\Carbon;
 
 class RentalController extends Controller
 {
@@ -16,7 +21,7 @@ class RentalController extends Controller
     {
         $rentals = Rental::with([
             'user',
-            'camera',
+            'rentalItems.camera',
             'rentalItems.equipment'
         ])->latest()->get();
 
@@ -27,42 +32,136 @@ class RentalController extends Controller
     public function store(Request $request)
     {
         $request->validate([
-            'start_date' => 'required|date',
+            'start_date' => 'required|date|after_or_equal:today',
             'end_date' => 'required|date|after:start_date',
-            'total_days' => 'required|integer|min:1',
-            'total_price' => 'required|integer|min:0',
-            'items' => 'required|array|min:1',
+            'voucher_code' => 'nullable|exists:vouchers,code',
+            'items'=> 'required|array|min:1',
+            'items.*.camera_id' => 'nullable|integer',
+            'items.*.equipment_id' => 'nullable|integer',
+            'items.*.price_per_day' => 'required|integer',
+            'items.*.quantity' => 'required|integer|min:1',
         ]);
+
+        // Hitung total hari otomatis pakai Carbon
+        $startDate = Carbon::parse($request->start_date);
+        $endDate = Carbon::parse($request->end_date);
+        $totalDays = $startDate->diffInDays($endDate);
 
         // Buat booking code unik
         $bookingCode = 'YK-' . strtoupper(\Illuminate\Support\Str::random(8));
 
-        // Simpan ke tabel rentals
-        $rental = Rental::create([
-            'booking_code' => $bookingCode,
-            'user_id' => $request->user()->id,
-            'start_date' => $request->start_date,
-            'end_date' => $request->end_date,
-            'total_days' => $request->total_days,
-            'total_price' => $request->total_price,
-            'status' => 'Aktif / Disewa',
-        ]);
+        // Memulai DB Transaction demi keamanan data stok dan nota transaksi
+        DB::beginTransaction();
 
-        // Simpan items ke tabel rental_items
-        foreach ($request->items as $item) {
-            \App\Models\RentalItem::create([
-                'rental_id' => $rental->id,
-                'camera_id' => $item['camera_id'] ?? null,
-                'equipment_id' => $item['equipment_id'] ?? null,
-                'price_per_day' => $item['price_per_day'],
+        try {
+            $grossTotalPrice = 0;
+            $itemsToSave = [];
+
+            // logika kalkulasi harga item dan pengurangan stok barang
+            foreach ($request->items as $item){
+                if (!empty($item['camera_id'])){
+                    $product = Camera::lockForUpdate()->find($item['camera_id']);
+                } else {
+                    $product = Equipment::lockForUpdate()->find($item['equipment_id']);
+                }
+
+                // Cek ketersediaan stok di database 
+                if (!$product || $product->stock < $item['quantity']) {
+                    throw new \Exception("Stok untuk '" . ($product->name ?? $product->brand) . "' tidak mencukupi!");
+                }
+
+                // Potong stok barang otomatis
+                $product->decrement('stock', $item['quantity']);
+
+                // RUMUS UTAMA: (Harga Per Hari * Kuantitas) * Total Hari
+                $itemTotalPrice = ($item['price_per_day'] * $item['quantity']) * $totalDays;
+                $grossTotalPrice += $itemTotalPrice;
+
+                $itemsToSave[] = [
+                    'camera_id' => $item['camera_id'] ?? null,
+                    'equipment_id' => $item['equipment_id'] ?? null,
+                    'price_per_day' => $item['price_per_day'],
+                    'quantity' => $item['quantity'],
+                    'total_price' => $itemTotalPrice
+                ];
+            }
+
+            // logika validasi kode voucher dan diskon
+            $discountAmount = 0;
+            $voucherId = null;
+
+            if ($request->filled('voucher_code')) {
+                $voucher = Voucher::where('code', $request->voucher_code)
+                    ->where('status', 'active')
+                    ->where('quota', '>', 0)
+                    ->first();
+
+                if ($voucher) {
+                    $voucherId = $voucher->id;
+                    
+                    //Hitung nominal potongan diskon (Persentase atau Nominal Tetap)
+                    if ($voucher->type === 'percentage') {
+                        $discountAmount = $grossTotalPrice * ($voucher->discount_value / 100);
+                    } else {
+                        $discountAmount = $voucher->discount_value;
+                    }
+
+                    // Kurangi kuota penggunaan voucher
+                    $voucher->decrement('quota');
+                } else {
+                    throw new \Exception("Voucher tidak dapat digunakan atau kuota sudah penuh.");
+                }
+            }
+            // Hitung total harga setelah diskon
+            $finalPrice = $grossTotalPrice - $discountAmount;
+            if ($finalPrice < 0) $finalPrice = 0;
+
+            // Simpan ke tabel rentals
+            $rental = Rental::create([
+                'booking_code' => $bookingCode,
+                'user_id' => $request->user()->id,
+                'start_date' => $request->start_date,
+                'end_date' => $request->end_date,
+                'total_days' => $totalDays,
+                'total_price' => $finalPrice,
+                'voucher_id' => $request->voucher_code ? \App\Models\Voucher::where('code', $request->voucher_code)->first()->id : null,
+                'status' => 'Aktif / Disewa',
             ]);
-        }
 
-        return response()->json([
-            'message' => 'Booking berhasil!',
-            'booking_code' => $bookingCode,
-            'rental' => $rental,
-        ], 201);
+              // Simpan items ke tabel rental_items
+            foreach ($itemsToSave as $itemData) {
+                \App\Models\RentalItem::create([
+                    'rental_id' => $rental->id,
+                    'camera_id' => $itemData['camera_id'] ?? null,
+                    'equipment_id' => $itemData['equipment_id'] ?? null,
+                    'price_per_day' => $itemData['price_per_day'],
+                    'quantity' => $itemData['quantity'],
+                    'total_price' => $itemData['total_price'],
+                ]);
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Booking berhasil!',
+                'booking_code' => $bookingCode,
+                'rental' => $rental->load('rentalItems.camera', 'rentalItems.equipment'),
+                'rincian_nota' => [
+                    'durasi' => $totalDays . ' Hari',
+                    'harga_awal' => $grossTotalPrice,
+                    'potongan_diskon' => $discountAmount,
+                    'total_akhir_wajib_bayar' => $finalPrice
+                ]
+            ], 201);
+        } catch (\Exception $e) {
+            // Jika ada yang error atau stok kosong, kembalikan data stok awal semula
+            DB::rollBack();
+
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], 400);
+        }
     }
 
     /**
@@ -72,7 +171,7 @@ class RentalController extends Controller
     {
         $rental = Rental::with([
             'user',
-            'camera',
+            'rentalItems.camera',
             'rentalItems.equipment'
         ])->findOrFail($id);
 
@@ -86,19 +185,42 @@ class RentalController extends Controller
     {
         $rental = Rental::findOrFail($id);
 
-        $validated = $request->validate([
-            'rent_date' => 'required|date',
-            'return_due' => 'required|date',
-            'return_date' => 'nullable|date',
-            'status' => 'required|in:pending,borrowed,returned',
-            'fine' => 'nullable|numeric|min:0'
+        $request->validate([
+            'status' => 'required|in:Menunggu Pembayaran,Aktif / Disewa,Selesai,Dibatalkan',
         ]);
 
-        $rental->update($validated);
+        $fine = 0;
+        $returnDate = null;
+
+        // KALKULASI DENDA OTOMATIS: Dihitung jika status diubah menjadi 'Selesai' (Kembali)
+        if ($request->status === 'Selesai') {
+            $returnDate = Carbon::now(); // Mengambil jam & tanggal pengembalian riil saat ini
+            $dueDate = Carbon::parse($rental->end_date); // Deadline sewa seharusnya
+
+            // Cek jika waktu pengembalian melampaui deadline sewa
+            if ($returnDate->gt($dueDate)) {
+                // Hitung selisih jam keterlambatannya
+                $hoursLate = $returnDate->diffInHours($dueDate);
+                
+                // Aturan Bisnis: Denda kelompok diset sebesar Rp 15.000 / jam keterlambatan
+                $fineRatePerHour = 15000; 
+                $fine = $hoursLate * $fineRatePerHour;
+            }
+        }
+
+        //upddate ke database
+        $rental->update([
+            'status' => $request->status,
+            'return_date' => $returnDate ?? $rental->return_date,
+            'fine' => $fine > 0 ? $fine : $rental->fine
+        ]);
 
         return response()->json([
-            'message' => 'Rental updated successfully',
-            'data' => $rental
+            'message' => 'Status rental dan kalkulasi denda berhasil diperbarui!',
+            'data' => $rental,
+            'info_keterlambatan'=> [
+                'total_denda_keterlambatan' => $fine
+            ]
         ]);
     }
 
@@ -115,4 +237,4 @@ class RentalController extends Controller
             'message' => 'Rental deleted successfully'
         ]);
     }
-}
+}   

@@ -11,11 +11,57 @@ class CameraController extends Controller
     /**
      * Display a listing of the resource.
      */
-    public function index()
+    public function index(Request $request)
     {
-        return response()->json(
-            Camera::latest()->get()
-        );
+        // Inisialisasi Query Builder dari Model Camera
+        $query = Camera::query();
+
+        if ($request->filled('Search')) {
+            $searchTerm = $request->search;
+            $query->where(function($q) use ($searchTerm) {
+                $q->where('name', 'LIKE', '%' . $searchTerm . '%')
+                  ->orWhere('brand', 'LIKE', '%' . $searchTerm . '%');
+            });
+        }
+
+        //pencarian  spesifik merk tertentu
+        if ($request->filled('brand')) {
+            $query->where('brand', $request->brand);
+        }
+
+        // FILTER TYPE / KATEGORI: Pencarian jenis kamera (misal: DSLR, Mirrorless)
+        if ($request->filled('type')) {
+            $query->where('type', $request->type);
+        }
+
+        //FILTER KETERSEDIAAN STOK: Mengecek apakah barang ready atau habis
+        if ($request->filled('available')) {
+            if ($request->available == 'true' || $request->available == '1') {
+                $query->where('stock', '>', 0); // Hanya tampilkan yang ready stok
+            } elseif ($request->available == 'false' || $request->available == '0') {
+                $query->where('stock', '=', 0); // Hanya tampilkan yang kosong/habis
+            }
+        }
+
+        // FILTER RENTANG HARGA MINIMAL (Min Price)
+        if ($request->filled('min_price')) {
+            $query->where('price_per_day', '>=', $request->min_price);
+        }
+
+        // FILTER RENTANG HARGA MAKSIMAL (Max Price)
+        if ($request->filled('max_price')) {
+            $query->where('price_per_day', '<=', $request->max_price);
+        }
+
+        //Urutkan dari yang paling baru diinput
+        $cameras = $query->latest()->get();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Berhasil memfilter katalog kamera secara real-time!',
+            'total_found' => $cameras->count(),
+            'data' => $cameras
+        ], 200);
     }
 
     /**

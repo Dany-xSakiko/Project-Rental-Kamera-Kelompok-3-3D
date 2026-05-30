@@ -13,6 +13,14 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->statefulApi();
+
+        $middleware->api(prepend: [
+            \Illuminate\Http\Middleware\HandleCors::class,
+        ]);
+
+        $middleware->validateCsrfTokens(except: [
+            'api/*', // Biar tim frontend bisa POST data tanpa keblokir token CSRF web
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

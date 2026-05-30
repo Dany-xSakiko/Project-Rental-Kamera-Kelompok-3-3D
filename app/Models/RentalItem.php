@@ -12,6 +12,8 @@ class RentalItem extends Model
         'camera_id',
         'equipment_id',
         'price_per_day',
+        'quantity',  //barru   
+        'total_price',
     ];
 
     public function rental(): BelongsTo

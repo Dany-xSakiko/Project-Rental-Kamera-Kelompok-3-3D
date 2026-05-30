@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\RentalController; // ← tambah ini
+use App\Http\Controllers\Api\CameraController;
 
 // Katalog
 Route::get('/katalog-produk', function () {
@@ -15,6 +16,9 @@ Route::get('/katalog-produk', function () {
         'equipments' => $equipments,
     ]);
 });
+
+//Katalog Kamera (Kita arahkan ke index CameraController agar fitur SEARCH & FILTER aktif)
+Route::get('/cameras', [CameraController::class, 'index']);
 
 // Auth
 Route::post('/register', [AuthController::class, 'register']);
