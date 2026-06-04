@@ -10,14 +10,19 @@ const rp = (n) => "Rp " + n.toLocaleString("id-ID");
 // ==========================================
 // 1. KOMPONEN NAVBAR & FOOTER
 // ==========================================
-const Navbar = ({ setActivePage, cartCount, user, setUser }) => (
+const Navbar = ({ setActivePage, cartCount, user, setUser, setSelectedProduct, onSearch }) => (
     <nav id="navbar">
         <div className="nav-logo" onClick={() => setActivePage("home")}>
             Yukirent Cam<span className="nav-logo-dot">✦</span>
         </div>
         <div className="nav-search">
             <span className="nav-search-icon">⌕</span>
-            <input type="text" placeholder="Cari kamera, lensa, aksesoris…" />
+            <input type="text" placeholder="Cari kamera, lensa, aksesoris…" onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                        onSearch(e.target.value);
+                    }
+                }}
+        />
         </div>
         <div className="nav-links">
             <span className="nav-a" onClick={() => setActivePage("home")}>
@@ -540,6 +545,7 @@ const CartPage = ({ cart, removeFromCart, clearCart, setActivePage }) => {
                 camera_id:     item.p.type === "camera" ? item.p.id : null,
                 equipment_id:  item.p.type === "equipment" ? item.p.id : null,
                 price_per_day: item.p.price,
+                quantity:      1,
             }));
 
             // Ambil tanggal dari item pertama di keranjang
@@ -986,6 +992,67 @@ const ProfilePage = ({ user, setUser, setActivePage }) => {
     );
 };
 
+// --- HALAMAN HASIL PENCARIAN ---
+const SearchPage = ({ results, setActivePage, setSelectedProduct }) => {
+    if (!results) return null;
+
+    return (
+        <div className="page active">
+            <div className="container" style={{ padding: "32px 28px" }}>
+                <div className="sec-head">
+                    <div className="sec-title">🔍 Hasil Pencarian ({results.length})</div>
+                    <span className="sec-link" onClick={() => setActivePage("catalog")}>Lihat Katalog →</span>
+                </div>
+                {results.length === 0 ? (
+                    <div className="empty">
+                        <div className="empty-icon">🔍</div>
+                        <h4>Tidak ada hasil ditemukan</h4>
+                        <button className="btn btn-ink" style={{ marginTop: "20px" }} onClick={() => setActivePage("catalog")}>
+                            Browse Katalog
+                        </button>
+                    </div>
+                ) : (
+                    <div className="cat-grid">
+                        {results.map(c => (
+                            <div
+                                key={c.id}
+                                className="pcard"
+                                onClick={() => {
+                                    setSelectedProduct({
+                                        id:      c.id,
+                                        type:    "camera",
+                                        brand:   c.brand,
+                                        name:    c.name || c.type,
+                                        price:   Math.round(c.price_per_day),
+                                        deposit: Math.round(c.price_per_day) * 2,
+                                        icon:    <img src={`/storage/${c.image}`} alt={c.name} className="camera-card-img" />,
+                                        desc:    c.description,
+                                    });
+                                    setActivePage("detail");
+                                }}
+                            >
+                                <div className="pcard-thumb">
+                                    <div className="pcard-thumb-inner">
+                                        <img src={`/storage/${c.image}`} alt={c.name} className="camera-card-img" />
+                                    </div>
+                                </div>
+                                <div className="pcard-body">
+                                    <div className="pcard-brand">{c.brand}</div>
+                                    <div className="pcard-name">{c.name || c.type}</div>
+                                    <div className="pcard-price">
+                                        {rp(Math.round(c.price_per_day))}
+                                        <span className="pcard-price-sub">/hari</span>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
 // ==========================================
 // 3. KOMPONEN APP (Root / Parent)
 // ==========================================
@@ -993,6 +1060,7 @@ export default function App() {
     const [activePage, setActivePage] = useState("home");
     const [selectedProduct, setSelectedProduct] = useState(null);
     const [cart, setCart] = useState([]);
+    const [searchResults, setSearchResults] = useState(null);
 
     // State User (Ubah default ke null jika ingin simulasi belum login)
     const [user, setUser] = useState(null);
@@ -1010,6 +1078,18 @@ export default function App() {
     // 1. FUNGSI BARU: Untuk mengosongkan keranjang setelah dibayar
     const clearCart = () => {
         setCart([]);
+    };
+
+    // Fungsi search — ambil dari API
+    const handleSearch = async (keyword) => {
+        if (!keyword.trim()) return;
+        try {
+            const { data } = await axios.get(`/api/cameras?search=${keyword}`);
+            setSearchResults(data.data);
+            setActivePage("search");
+        } catch (err) {
+            console.error(err);
+        }
     };
 
     // Router Sederhana
@@ -1058,6 +1138,14 @@ export default function App() {
                         setActivePage={setActivePage}
                     />
                 );
+                case "search":
+                    return (
+                        <SearchPage
+                            results={searchResults}
+                            setActivePage={setActivePage}
+                            setSelectedProduct={setSelectedProduct}
+                        />
+                    );
             default:
                 return (
                     <HomePage
@@ -1075,6 +1163,7 @@ export default function App() {
                 cartCount={cart.length}
                 user={user}
                 setUser={setUser}
+                onSearch={handleSearch}
             />
             {renderPage()}
             {activePage !== "auth" && <Footer />}
