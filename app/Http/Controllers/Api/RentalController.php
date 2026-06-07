@@ -6,7 +6,6 @@ use App\Http\Controllers\Controller;
 use App\Models\Camera;
 use App\Models\Equipment; // baru
 use App\Models\Rental;
-use App\models\Voucher; 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -29,12 +28,12 @@ class RentalController extends Controller
     }
 
     /*Store a newly created rental from checkout.*/
+
     public function store(Request $request)
     {
         $request->validate([
             'start_date' => 'required|date|after_or_equal:today',
             'end_date' => 'required|date|after:start_date',
-            'voucher_code' => 'nullable|exists:vouchers,code',
             'items'=> 'required|array|min:1',
             'items.*.camera_id' => 'nullable|integer',
             'items.*.equipment_id' => 'nullable|integer',
@@ -86,36 +85,6 @@ class RentalController extends Controller
                 ];
             }
 
-            // logika validasi kode voucher dan diskon
-            $discountAmount = 0;
-            $voucherId = null;
-
-            if ($request->filled('voucher_code')) {
-                $voucher = Voucher::where('code', $request->voucher_code)
-                    ->where('status', 'active')
-                    ->where('quota', '>', 0)
-                    ->first();
-
-                if ($voucher) {
-                    $voucherId = $voucher->id;
-                    
-                    //Hitung nominal potongan diskon (Persentase atau Nominal Tetap)
-                    if ($voucher->type === 'percentage') {
-                        $discountAmount = $grossTotalPrice * ($voucher->discount_value / 100);
-                    } else {
-                        $discountAmount = $voucher->discount_value;
-                    }
-
-                    // Kurangi kuota penggunaan voucher
-                    $voucher->decrement('quota');
-                } else {
-                    throw new \Exception("Voucher tidak dapat digunakan atau kuota sudah penuh.");
-                }
-            }
-            // Hitung total harga setelah diskon
-            $finalPrice = $grossTotalPrice - $discountAmount;
-            if ($finalPrice < 0) $finalPrice = 0;
-
             // Simpan ke tabel rentals
             $rental = Rental::create([
                 'booking_code' => $bookingCode,
@@ -123,8 +92,7 @@ class RentalController extends Controller
                 'start_date' => $request->start_date,
                 'end_date' => $request->end_date,
                 'total_days' => $totalDays,
-                'total_price' => $finalPrice,
-                'voucher_id' => $request->voucher_code ? \App\Models\Voucher::where('code', $request->voucher_code)->first()->id : null,
+                'total_price' => $grossTotalPrice,
                 'status' => 'Aktif / Disewa',
             ]);
 
@@ -148,11 +116,10 @@ class RentalController extends Controller
                 'rental' => $rental->load('rentalItems.camera', 'rentalItems.equipment'),
                 'rincian_nota' => [
                     'durasi' => $totalDays . ' Hari',
-                    'harga_awal' => $grossTotalPrice,
-                    'potongan_diskon' => $discountAmount,
-                    'total_akhir_wajib_bayar' => $finalPrice
+                    'total_akhir_wajib_bayar' => $grossTotalPrice
                 ]
             ], 201);
+            
         } catch (\Exception $e) {
             // Jika ada yang error atau stok kosong, kembalikan data stok awal semula
             DB::rollBack();
@@ -181,47 +148,84 @@ class RentalController extends Controller
     /**
      * Update the specified rental.
      */
-    public function update(Request $request, string $id)
+    public function updateStatus(Request $request, string $id)
     {
-        $rental = Rental::findOrFail($id);
+        $rental = Rental::with('rentalItems')->findOrFail($id);
 
         $request->validate([
             'status' => 'required|in:Menunggu Pembayaran,Aktif / Disewa,Selesai,Dibatalkan',
         ]);
 
-        $fine = 0;
-        $returnDate = null;
+        $oldStatus = $rental->status;
+        $newStatus = $request->status;
 
-        // KALKULASI DENDA OTOMATIS: Dihitung jika status diubah menjadi 'Selesai' (Kembali)
-        if ($request->status === 'Selesai') {
-            $returnDate = Carbon::now(); // Mengambil jam & tanggal pengembalian riil saat ini
-            $dueDate = Carbon::parse($rental->end_date); // Deadline sewa seharusnya
+        $fine = $rental->fine;
+        $returnDate = $rental->return_date;
 
-            // Cek jika waktu pengembalian melampaui deadline sewa
-            if ($returnDate->gt($dueDate)) {
-                // Hitung selisih jam keterlambatannya
-                $hoursLate = $returnDate->diffInHours($dueDate);
-                
-                // Aturan Bisnis: Denda kelompok diset sebesar Rp 15.000 / jam keterlambatan
-                $fineRatePerHour = 15000; 
-                $fine = $hoursLate * $fineRatePerHour;
+        DB::beginTransaction();
+
+        try {
+            // KONDISI A: JIKA STATUS DIUBAH JADI 'Selesai' (Barang Dikembalikan)
+            if ($newStatus === 'Selesai' && $oldStatus !== 'Selesai') {
+                $returnDate = Carbon::now(); // Ambil tanggal pengembalian riil saat ini
+                $dueDate = Carbon::parse($rental->end_date); // Deadline sewa seharusnya
+
+                // Kalkulasi Denda jika telat mengembalikan bray
+                if ($returnDate->gt($dueDate)) {
+                    $hoursLate = $returnDate->diffInHours($dueDate);
+                    $fineRatePerHour = 15000; // Aturan bisnis Rp 15.000 / jam
+                    $fine = $hoursLate * $fineRatePerHour;
+                }
+
+                // 🔥 KEMBALIKAN STOK BARANG SECARA OTOMATIS
+                foreach ($rental->rentalItems as $item) {
+                    if (!empty($item->camera_id)) {
+                        // Jika item itu kamera, tambahkan stoknya kembali ke tabel cameras
+                        Camera::where('id', $item->camera_id)->increment('stock', $item->quantity);
+                    } elseif (!empty($item->equipment_id)) {
+                        // Jika item itu lensa/aksesoris, tambahkan stoknya kembali ke tabel equipments
+                        Equipment::where('id', $item->equipment_id)->increment('stock', $item->quantity);
+                    }
+                }
             }
+
+            // KONDISI B: JIKA TRANSAKSI 'Dibatalkan' (Stok dikembalikan karena batal sewa)
+            if ($newStatus === 'Dibatalkan' && $oldStatus !== 'Dibatalkan' && $oldStatus !== 'Selesai') {
+                
+                // 🔥 KEMBALIKAN STOK KARENA PEMBATALAN TRANSAKSI
+                foreach ($rental->rentalItems as $item) {
+                    if (!empty($item->camera_id)) {
+                        Camera::where('id', $item->camera_id)->increment('stock', $item->quantity);
+                    } elseif (!empty($item->equipment_id)) {
+                        Equipment::where('id', $item->equipment_id)->increment('stock', $item->quantity);
+                    }
+                }
+            }
+
+            // 4. Update status final ke database
+            $rental->update([
+                'status' => $newStatus,
+                'return_date' => $returnDate,
+                'fine' => $fine
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Status rental dan kalkulasi denda berhasil diperbarui!',
+                'data' => $rental->load('rentalItems.camera', 'rentalItems.equipment'),
+                'info_keterlambatan'=> [
+                    'total_denda_keterlambatan' => $fine
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal memperbarui status rental: ' . $e->getMessage()
+            ], 500);
         }
-
-        //upddate ke database
-        $rental->update([
-            'status' => $request->status,
-            'return_date' => $returnDate ?? $rental->return_date,
-            'fine' => $fine > 0 ? $fine : $rental->fine
-        ]);
-
-        return response()->json([
-            'message' => 'Status rental dan kalkulasi denda berhasil diperbarui!',
-            'data' => $rental,
-            'info_keterlambatan'=> [
-                'total_denda_keterlambatan' => $fine
-            ]
-        ]);
     }
 
     /**
