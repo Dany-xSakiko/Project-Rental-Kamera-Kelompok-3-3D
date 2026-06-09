@@ -17,6 +17,7 @@ class AuthController extends Controller
             'name' => 'required|string|max:255',
             'email' => 'required|email|unique:users,email',
             'password' => 'required|string|min:6|confirmed',
+            'phone' => 'nullable|string|max:20',
         ]);
 
         $user = User::create([
@@ -63,9 +64,39 @@ class AuthController extends Controller
         ]);
     }
 
+    //loginadmin 
+    public function loginAdmin(Request $request)
+    {
+        $request->validate([
+            'email' => 'required|email',
+            'password' => 'required',
+        ]);
+
+        $user = User::where('email', $request->email)
+                    ->where('role', 'admin') // Pastikan hanya admin yang bisa login    
+                    ->first();
+
+        if (!$user || !Hash::check($request->password, $user->password) || $user->role !== 'admin') {
+            throw ValidationException::withMessages([
+                'email' => ['Email atau password salah, atau Anda bukan admin.'],
+            ]);
+        }
+
+        // Isi remember_token
+        $user->remember_token = \Illuminate\Support\Str::random(60);
+        $user->save();
+
+        $token = $user->createToken('auth_token')->plainTextToken;
+
+        return response()->json([
+            'user' => $user,
+            'token' => $token,
+        ]);
+    }
+
     // LOGOUT
     public function logout(Request $request)
-    {
+    {   
         $request->user()->currentAccessToken()->delete();
 
         return response()->json(['message' => 'Berhasil logout.']);

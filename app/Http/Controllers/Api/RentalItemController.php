@@ -7,6 +7,7 @@ use App\Models\Equipment;
 use App\Models\Rental;
 use App\Models\RentalItem;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class RentalItemController extends Controller
 {
@@ -44,28 +45,20 @@ class RentalItemController extends Controller
             ], 400);
         }
 
-        $subtotal = (
-            $equipment->price_per_day *
-            $validated['quantity']
-        );
+        $totalPrice = $equipment->price_per_day * $validated['quantity'];
 
         $item = RentalItem::create([
-            'rental_id' => $validated['rental_id'],
-            'equipment_id' => $validated['equipment_id'],
-            'quantity' => $validated['quantity'],
-            'subtotal' => $subtotal
+        'rental_id' => $validated['rental_id'],
+        'equipment_id' => $validated['equipment_id'],
+        'price_per_day' => $equipment->price_per_day,
+        'quantity' => $validated['quantity'],
+        'total_price' => $totalPrice
         ]);
 
-        $rental = Rental::findOrFail(
-            $validated['rental_id']
-        );
+        $rental = Rental::findOrFail($validated['rental_id']);
+        $rental->increment('total_price', $totalPrice);
 
-        $rental->increment('total_price', $subtotal);
-
-        $equipment->decrement(
-            'stock',
-            $validated['quantity']
-        );
+        $equipment->decrement('stock', $validated['quantity']);
 
         return response()->json([
             'message' => 'Rental item created successfully',
@@ -101,15 +94,37 @@ class RentalItemController extends Controller
             $item->equipment_id
         );
 
-        $newSubtotal = (
+        $quantityDifference = $validated['quantity'] - $item->quantity;
+
+        // Cek stok jika quantity ditambah
+        if ($quantityDifference > 0 && $equipment->stock < $quantityDifference) {
+            return response()->json([
+                'message' => 'Equipment stock is not enough for the additional quantity'
+            ], 400);
+        }
+
+        $newTotalPrice = (
             $equipment->price_per_day *
             $validated['quantity']
         );
 
-        $item->update([
-            'quantity' => $validated['quantity'],
-            'subtotal' => $newSubtotal
-        ]);
+        $difference = $newTotalPrice - $item->total_price;
+
+        DB::transaction(function () use ($item, $validated, $newTotalPrice, $difference, $equipment, $quantityDifference) {
+            $item->update([
+                'quantity' => $validated['quantity'],
+                'total_price' => $newTotalPrice
+            ]);
+
+            if ($difference !== 0) {
+                $item->rental->increment('total_price', $difference);
+            }
+
+            // Update stok jika quantity berubah
+            if ($quantityDifference !== 0) {
+                $equipment->decrement('stock', $quantityDifference);
+            }
+        });
 
         return response()->json([
             'message' => 'Rental item updated successfully',
@@ -120,11 +135,26 @@ class RentalItemController extends Controller
     /**
      * Remove the specified rental item.
      */
-    public function destroy(string $id)
+    public function destroy(Request $request, string $id)
     {
         $item = RentalItem::findOrFail($id);
 
-        $item->delete();
+        if ($request->user()->role !== 'admin' && $item->rental->user_id !== $request->user()->id) {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
+        DB::transaction(function () use ($item) {
+            // Kembalikan stok equipment
+            if ($item->equipment_id) {
+                Equipment::where('id', $item->equipment_id)->increment('stock', $item->quantity);
+            }
+
+            // Kurangi total price rental
+            $item->rental->decrement('total_price', $item->total_price);
+
+            // Hapus item
+            $item->delete();
+        });
 
         return response()->json([
             'message' => 'Rental item deleted successfully'

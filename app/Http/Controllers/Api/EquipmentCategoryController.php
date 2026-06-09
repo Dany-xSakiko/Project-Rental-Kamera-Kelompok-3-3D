@@ -17,6 +17,11 @@ class EquipmentCategoryController extends Controller
 
     public function store(Request $request)
     {
+
+        if ($request->user()->role !== 'admin') {
+        return response()->json(['message' => 'Forbidden'], 403);
+        }
+        
         $validated = $request->validate([
             'name' => 'required|max:50'
         ]);
@@ -38,6 +43,10 @@ class EquipmentCategoryController extends Controller
 
     public function update(Request $request, string $id)
     {
+        if ($request->user()->role !== 'admin') {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
         $category = EquipmentCategory::findOrFail($id);
 
         $validated = $request->validate([
@@ -54,6 +63,10 @@ class EquipmentCategoryController extends Controller
 
     public function destroy(string $id)
     {
+        if ($request->user()->role !== 'admin') {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
         $category = EquipmentCategory::findOrFail($id);
 
         $category->delete();

@@ -2,144 +2,127 @@
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Hash;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ProfileController;
-use App\Http\Controllers\Api\RentalController; // ← tambah ini
+use App\Http\Controllers\Api\RentalController;
 use App\Http\Controllers\Api\CameraController;
-use Illuminate\Support\Facades\Hash;
-use Laravel\Sanctum\HasApiTokens;
+use App\Http\Controllers\Api\EquipmentController;
+use App\Http\Controllers\Api\EquipmentCategoryController;
+use App\Http\Controllers\Api\RentalItemController;
 
-
-// Katalog
+// Katalog produk umum
 Route::get('/katalog-produk', function () {
     $cameras = DB::table('cameras')->get();
     $equipments = DB::table('equipments')->get();
+
     return response()->json([
         'cameras' => $cameras,
         'equipments' => $equipments,
     ]);
 });
 
-//Katalog Kamera (Kita arahkan ke index CameraController agar fitur SEARCH & FILTER aktif)
-Route::get('/cameras', [CameraController::class, 'index']);
-
-// Auth
+// Auth (publik)
 Route::post('/register', [AuthController::class, 'register']);
-Route::post('/login', function (\Illuminate\Http\Request $request) {
-    $request->validate([
-        'email' => 'required|email',
-        'password' => 'required',
-    ]);
+Route::post('/login', [AuthController::class, 'login']);
+Route::post('/admin/login', [AuthController::class, 'loginAdmin']);
+Route::post('/logout', [AuthController::class, 'logout']);
 
-    $user = \App\Models\User::where('email', $request->email)->first();
+// Katalog publik - bisa dibaca semua
+Route::get('/cameras', [CameraController::class, 'index']);
+Route::get('/cameras/{id}', [CameraController::class, 'show']);
 
-    if ($user && Hash::check($request->password, $user->password)) {
-        // Hapus token lama untuk keamanan
-        $user->tokens()->delete();
-
-        // Buat token Sanctum yang valid
-        $token = $user->createToken('auth_token')->plainTextToken;
-
-        return response()->json([
-            'message' => 'Login Berhasil',
-            'token' => $token, // Token ini sekarang dikenali oleh middleware
-            'user' => [
-                'id' => $user->id,
-                'name' => $user->name,
-                'email' => $user->email,
-                'role' => $user->role ?? 'admin'
-            ]
-        ], 200);
-    }
-
-    return response()->json(['message' => 'Email atau Password salah!'], 401);
-});
-
-
-// Route yang butuh login
+// Route yang harus login
 Route::middleware('auth:sanctum')->group(function () {
-    Route::post('/logout', [AuthController::class, 'logout']);
-    Route::put('/profile', [ProfileController::class, 'update']);
-    Route::post('/rentals', [RentalController::class, 'store']); // ← tambah ini
+    // CRUD kamera - hanya admin
+    Route::post('/cameras', [CameraController::class, 'store']);
+    Route::put('/cameras/{id}', [CameraController::class, 'update']);
+    Route::delete('/cameras/{id}', [CameraController::class, 'destroy']);
 
-        // Management Rental untuk Admin
+    // Checkout user
+    Route::post('/rentals', [RentalController::class, 'store']);
+
+    // History / detail rental untuk user/admin
+    Route::get('/rentals', [RentalController::class, 'index']);
+    Route::get('/rentals/{id}', [RentalController::class, 'show']);
+    Route::delete('/rentals/{id}', [RentalController::class, 'destroy']);
+
+    // Admin rental management
     Route::get('/admin/rentals', [RentalController::class, 'index']);
     Route::put('/admin/rentals/{id}/status', [RentalController::class, 'updateStatus']);
-});
 
-// ✦ ENDPOINT UTAMA DASHBOARD ADMIN ✦
-Route::get('/admin/dashboard-stats', function () {
-    try {
-        // 1. Ambil data booking secara kasaran tanpa JOIN dulu
-        $rentals = DB::table('rentals')
-            ->orderBy('id', 'desc')
-            ->limit(5)
-            ->get();
+    // CRUD equipments / kategori / rental item
+    Route::apiResource('equipments', EquipmentController::class);
+    Route::apiResource('equipment-categories', EquipmentCategoryController::class);
+    Route::apiResource('rental-items', RentalItemController::class);
 
-        // 2. Kita petakan datanya secara manual agar nama pelanggan aman
-        $bookingTerbaru = $rentals->map(function ($item) {
-            $user = DB::table('users')->where('id', $item->user_id)->first();
+    // Admin dashboard / pelanggan
+    Route::get('/admin/dashboard-stats', function () {
+        try {
+            $rentals = DB::table('rentals')
+                ->orderBy('id', 'desc')
+                ->limit(5)
+                ->get();
 
-            $namaBarang = 'Kamera';
-            if (isset($item->nama_barang)) {
-                $namaBarang = $item->nama_barang;
-            } elseif (isset($item->camera_name)) {
-                $namaBarang = $item->camera_name;
+            $bookingTerbaru = $rentals->map(function ($item) {
+                $user = DB::table('users')->where('id', $item->user_id)->first();
+
+                $namaBarang = 'Kamera';
+                if (isset($item->nama_barang)) {
+                    $namaBarang = $item->nama_barang;
+                } elseif (isset($item->camera_name)) {
+                    $namaBarang = $item->camera_name;
+                }
+
+                return [
+                    'id' => $item->id,
+                    'pelanggan_nama' => $user ? $user->name : 'Guest/Member',
+                    'nama_barang' => $namaBarang,
+                    'start_date' => $item->start_date ?? $item->tanggal_sewa ?? '-',
+                    'end_date' => $item->end_date ?? '',
+                    'status' => $item->status ?? 'Pending',
+                    'total_price' => $item->total_price ?? $item->total_harga ?? 0,
+                ];
+            });
+
+            $totalBarang = 0;
+            try {
+                $totalBarang = DB::table('cameras')->count();
+            } catch (\Exception $e) {
+                // abaikan jika tabel salah
             }
 
-            return [
-                'id' => $item->id,
-                'pelanggan_nama' => $user ? $user->name : 'Guest/Member',
-                'nama_barang' => $namaBarang,
-                'start_date' => $item->start_date ?? $item->tanggal_sewa ?? '-',
-                'end_date' => $item->end_date ?? '',
-                'status' => $item->status ?? 'Pending',
-                'total_price' => $item->total_price ?? $item->total_harga ?? 0,
-            ];
-        });
+            $sedangDisewa = DB::table('rentals')->where('status', 'Aktif / Disewa')->count();
+            $menungguPickup = DB::table('rentals')->where('status', 'Menunggu Pickup')->count();
+            $pendapatan = DB::table('rentals')->sum('total_price' ?? 'total_harga' ?? 0);
 
-        // 3. Ambil statistik atas dengan pengaman try-catch internal
-        $totalBarang = 0;
-        try {
-            $totalBarang = DB::table('cameras')->count();
+            return response()->json([
+                'total_barang' => $totalBarang,
+                'sedang_disewa' => $sedangDisewa,
+                'menunggu_pickup' => $menungguPickup,
+                'pendapatan' => $pendapatan ? (int) $pendapatan : 0,
+                'booking_terbaru' => $bookingTerbaru
+            ], 200);
         } catch (\Exception $e) {
-            /* abaikan jika tabel salah */
+            return response()->json([
+                'error' => 'Database Error',
+                'message' => $e->getMessage()
+            ], 500);
         }
+    });
 
-        $sedangDisewa = DB::table('rentals')->where('status', 'Aktif / Disewa')->count();
-        $menungguPickup = DB::table('rentals')->where('status', 'Menunggu Pickup')->count();
-        $pendapatan = DB::table('rentals')->sum('total_price' ?? 'total_harga' ?? 0);
+    Route::get('/admin/pelanggan', function () {
+        try {
+            $users = DB::table('users')->orderBy('id', 'desc')->get();
+            return response()->json($users, 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Gagal mengambil data pelanggan',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    });
 
-        return response()->json([
-            'total_barang' => $totalBarang,
-            'sedang_disewa' => $sedangDisewa,
-            'menunggu_pickup' => $menungguPickup,
-            'pendapatan' => $pendapatan ? (int) $pendapatan : 0,
-            'booking_terbaru' => $bookingTerbaru
-        ], 200);
-
-    } catch (\Exception $e) {
-        return response()->json([
-            'error' => 'Database Error',
-            'message' => $e->getMessage()
-        ], 500);
-    }
+    Route::put('/profile', [ProfileController::class, 'update']);
 });
 
-
-// ✦ TAMBAHKAN INI UNTUK MENU PELANGGAN ✦
-Route::get('/admin/pelanggan', function () {
-    try {
-        $users = DB::table('users')->orderBy('id', 'desc')->get();
-        return response()->json($users, 200);
-    } catch (\Exception $e) {
-        return response()->json([
-            'error' => 'Gagal mengambil data pelanggan',
-            'message' => $e->getMessage()
-        ], 500);
-    }
-});
-
-// Resource individual kamera untuk keperluan CRUD Admin
-Route::put('/cameras/{id}', [CameraController::class, 'update']);
-Route::apiResource('cameras', CameraController::class);

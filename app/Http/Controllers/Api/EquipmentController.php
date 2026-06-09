@@ -8,15 +8,54 @@ use Illuminate\Http\Request;
 
 class EquipmentController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        return response()->json(
-            Equipment::with('category')->latest()->get()
-        );
+        $searchTerm = $request->search;
+        $equipmentQuery = Equipment::with('category');
+
+        if ($request->filled('search')) {
+            $equipmentQuery->where(function ($q) use ($searchTerm) {
+                $q->where('name', 'LIKE', "%{$searchTerm}%")
+                  ->orWhere('brand', 'LIKE', "%{$searchTerm}%");
+            });
+        }
+
+        if ($request->filled('brand')) {
+            $equipmentQuery->where('brand', $request->brand);
+        }
+
+        if ($request->filled('type')) {
+            $equipmentQuery->whereHas('category', function ($q) use ($request) {
+                $q->whereRaw('LOWER(name) = ?', [strtolower($request->type)]);
+            });
+        }
+
+        if ($request->filled('available')) {
+            $equipmentQuery->where('stock', $request->available === 'true' ? '>' : '=', 0);
+        }
+
+        if ($request->filled('min_price')) {
+            $equipmentQuery->where('price_per_day', '>=', $request->min_price);
+        }
+
+        if ($request->filled('max_price')) {
+            $equipmentQuery->where('price_per_day', '<=', $request->max_price);
+        }
+
+        $equipments = $equipmentQuery->latest()->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => $equipments,
+        ], 200);
     }
 
     public function store(Request $request)
     {
+        if ($request->user()->role !== 'admin') {
+        return response()->json(['message' => 'Forbidden'], 403);
+        }
+
         $validated = $request->validate([
             'equipment_category_id' => 'required|exists:equipment_categories,id',
             'name' => 'required|max:100',
@@ -44,6 +83,10 @@ class EquipmentController extends Controller
 
     public function update(Request $request, string $id)
     {
+        if ($request->user()->role !== 'admin') {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
         $equipment = Equipment::findOrFail($id);
 
         $validated = $request->validate([
@@ -64,8 +107,12 @@ class EquipmentController extends Controller
         ]);
     }
 
-    public function destroy(string $id)
+    public function destroy(Request $request, string $id)
     {
+        if ($request->user()->role !== 'admin') {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
         $equipment = Equipment::findOrFail($id);
 
         $equipment->delete();

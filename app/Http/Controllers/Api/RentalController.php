@@ -16,15 +16,20 @@ class RentalController extends Controller
     /**
      * Display a listing of rentals.
      */
-    public function index()
+    public function index(Request $request)
     {
-        $rentals = Rental::with([
+        $user = $request->user();
+        $query = Rental::with([
             'user',
             'rentalItems.camera',
             'rentalItems.equipment'
-        ])->latest()->get();
+        ])->latest();
 
-        return response()->json($rentals);
+        if ($user->role !== 'admin') {
+            $query->where('user_id', $user->id);
+        }
+
+        return response()->json($query->get());
     }
 
     /*Store a newly created rental from checkout.*/
@@ -34,10 +39,10 @@ class RentalController extends Controller
         $request->validate([
             'start_date' => 'required|date|after_or_equal:today',
             'end_date' => 'required|date|after:start_date',
-            'items'=> 'required|array|min:1',
-            'items.*.camera_id' => 'nullable|integer',
-            'items.*.equipment_id' => 'nullable|integer',
-            'items.*.price_per_day' => 'required|integer',
+            'items' => 'required|array|min:1',
+            'items.*.camera_id' => 'nullable|integer|exists:cameras,id|required_without:items.*.equipment_id',
+            'items.*.equipment_id' => 'nullable|integer|exists:equipments,id|required_without:items.*.camera_id',
+            'items.*.price_per_day' => 'nullable|numeric|min:0',
             'items.*.quantity' => 'required|integer|min:1',
         ]);
 
@@ -69,17 +74,20 @@ class RentalController extends Controller
                     throw new \Exception("Stok untuk '" . ($product->name ?? $product->brand) . "' tidak mencukupi!");
                 }
 
+                // Ambil harga dari database, bukan dari client
+                $pricePerDay = $product->price_per_day;
+
                 // Potong stok barang otomatis
                 $product->decrement('stock', $item['quantity']);
 
                 // RUMUS UTAMA: (Harga Per Hari * Kuantitas) * Total Hari
-                $itemTotalPrice = ($item['price_per_day'] * $item['quantity']) * $totalDays;
+                $itemTotalPrice = ($pricePerDay * $item['quantity']) * $totalDays;
                 $grossTotalPrice += $itemTotalPrice;
 
                 $itemsToSave[] = [
                     'camera_id' => $item['camera_id'] ?? null,
                     'equipment_id' => $item['equipment_id'] ?? null,
-                    'price_per_day' => $item['price_per_day'],
+                    'price_per_day' => $pricePerDay,
                     'quantity' => $item['quantity'],
                     'total_price' => $itemTotalPrice
                 ];
@@ -134,13 +142,17 @@ class RentalController extends Controller
     /**
      * Display the specified rental.
      */
-    public function show(string $id)
+    public function show(Request $request, string $id)
     {
         $rental = Rental::with([
             'user',
             'rentalItems.camera',
             'rentalItems.equipment'
         ])->findOrFail($id);
+
+        if ($request->user()->role !== 'admin' && $rental->user_id !== $request->user()->id) {
+        return response()->json(['message' => 'Forbidden'], 403);
+    }
 
         return response()->json($rental);
     }
@@ -150,6 +162,10 @@ class RentalController extends Controller
      */
     public function updateStatus(Request $request, string $id)
     {
+        if ($request->user()->role !== 'admin') {
+        return response()->json(['message' => 'Forbidden'], 403);
+    }
+    
         $rental = Rental::with('rentalItems')->findOrFail($id);
 
         $request->validate([
@@ -231,14 +247,32 @@ class RentalController extends Controller
     /**
      * Remove the specified rental.
      */
-    public function destroy(string $id)
+    public function destroy(Request $request, string $id)
     {
         $rental = Rental::findOrFail($id);
 
-        $rental->delete();
+        if ($request->user()->role !== 'admin' && $rental->user_id !== $request->user()->id) {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+        
+        DB::transaction(function () use ($rental) {
+        if (!in_array($rental->status, ['Selesai', 'Dibatalkan'])) {
+            foreach ($rental->rentalItems as $item) {
+                if ($item->camera_id) {
+                    Camera::where('id', $item->camera_id)->increment('stock', $item->quantity);
+                }
 
+                if ($item->equipment_id) {
+                    Equipment::where('id', $item->equipment_id)->increment('stock', $item->quantity);
+                }
+            }
+        }
+
+        $rental->delete();
+        });
+        
         return response()->json([
             'message' => 'Rental deleted successfully'
         ]);
     }
-}   
+}
