@@ -1,10 +1,28 @@
 import React, { useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import "../css/app.css";
-import axios from "axios";
 
-// --- FORMAT RUPIAH ---
-const rp = (n) => "Rp " + n.toLocaleString("id-ID");
+
+import {
+    loginAdmin, 
+    getDashboardStats, 
+    getRentals,
+    updateRentalStatus, 
+    getPelanggan, 
+    getCameras,
+    getEquipments,
+    deleteCamera,
+    deleteEquipment,
+    updateProduct,
+} from "./services/apiadmin";
+import {
+    rp, 
+    parseRentalsResponse, 
+    isCameraItem,
+    filterCameras, 
+    statusBadgeClass, 
+    dashboardStatusClass,
+} from "./helpers/adminMappers";
 
 // --- KOMPONEN TRANSAKSI ---
 const TransaksiView = () => {
@@ -12,60 +30,23 @@ const TransaksiView = () => {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        axios.get("/api/admin/rentals", {
-            headers: { Authorization: "Bearer " + localStorage.getItem("token") }
-        })
+        getRentals()
         .then(({ data }) => {
             // 🔎 INTIP STRUKTUR: Klik kanan di browser -> Inspect -> Tab Console
             console.log("=== CHECK DATA API RENTALS ===", data);
-
-            // 🛠️ PAKSA JALUR: Jika data langsung array
-            if (Array.isArray(data)) {
-                setRentals(data);
-            } 
-            // Jika dibungkus pagination bawaan Laravel biasa ($rentals->paginate())
-            else if (data && data.data && Array.isArray(data.data)) {
-                setRentals(data.data);
-            } 
-            // Jika dibungkus API Resource / objek kustom bernama rentals
-            else if (data && data.rentals && Array.isArray(data.rentals)) {
-                setRentals(data.rentals);
-            } 
-            // Jika dibungkus pagination di dalam objek rentals
-            else if (data && data.rentals && data.rentals.data && Array.isArray(data.rentals.data)) {
-                setRentals(data.rentals.data);
-            } 
-            // 💡 CARA ALT JIKA FORMATNYA OBJEK LAIN: Kita coba ambil paksa key pertama yang berupa array
-            else if (data && typeof data === 'object') {
-                const ketemuArray = Object.values(data).find(val => Array.isArray(val));
-                if (ketemuArray) {
-                    setRentals(ketemuArray);
-                } else if (stats && Array.isArray(stats.booking_terbaru)) {
-                    setRentals(stats.booking_terbaru); // Balik ke data dashboard
-                } else {
-                    setRentals([]);
-                }
-            } 
-            else {
-                setRentals([]);
-            }
+            setRentals(parseRentalsResponse(data));
             setLoading(false);
         })
         .catch((err) => {
             console.error("Gagal load API rentals:", err);
-            if (stats && Array.isArray(stats.booking_terbaru)) {
-                setRentals(stats.booking_terbaru);
-            }
             setLoading(false);
         });
     }, []);
 
     const updateStatus = async (id, status) => {
         try {
-            await axios.put(`/api/admin/rentals/${id}/status`, { status }, {
-                headers: { Authorization: "Bearer " + localStorage.getItem("token") }
-            });
-            setRentals(rentals.map(r => r.id === id ? { ...r, status } : r));
+            await updateRentalStatus(id, status);
+            setRentals((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
             alert("✅ Status berhasil diupdate!");
         } catch (err) {
             alert("❌ " + (err.response?.data?.message || err.message));
@@ -95,7 +76,7 @@ const TransaksiView = () => {
                     </thead>
                     <tbody>
                         {/* SEKRING PENGAMAN: Cek dulu apakah rentals ada dan berupa array */}
-                        {rentals && Array.isArray(rentals) && rentals.length > 0 ? (
+                        {rentals.length > 0 ? (
                             rentals.map(r => (
                                 <tr key={r.id}>
                                     <td><strong>{r.booking_code}</strong></td>
@@ -104,11 +85,7 @@ const TransaksiView = () => {
                                     <td>{r.total_days} hari</td>
                                     <td><strong>{typeof rp === 'function' ? rp(r.total_price) : `Rp ${r.total_price}`}</strong></td>
                                     <td>
-                                        <span className={`badge-status ${
-                                            r.status === "Aktif / Disewa" ? "st-active" :
-                                            r.status === "Selesai" ? "st-active" :
-                                            r.status === "Dibatalkan" ? "st-danger" :
-                                            "st-pending"
+                                        <span className={`badge-status ${statusBadgeClass(r.status)
                                         }`}>
                                             {r.status}
                                         </span>
@@ -116,7 +93,7 @@ const TransaksiView = () => {
                                     <td>
                                         <select
                                             value={r.status}
-                                            onChange={(e) => updateStatus && updateStatus(r.id, e.target.value)}
+                                            onChange={(e) => updateStatus(r.id, e.target.value)}
                                             style={{ fontSize: "12px", padding: "4px 8px", borderRadius: "4px", border: "1px solid #ddd" }}
                                         >
                                             <option>Menunggu Pembayaran</option>
@@ -148,14 +125,9 @@ const PelangganView = () => {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        // Mengambil token login admin yang tersimpan
-        const token = localStorage.getItem("adminToken") || localStorage.getItem("token");
-        
-        axios.get("/api/admin/pelanggan", {
-            headers: { Authorization: "Bearer " + token }
-        })
+        getPelanggan()
         .then(({ data }) => {
-            setCustomers(data);
+            setCustomers(Array.isArray(data) ? data : data?.data || []);
             setLoading(false);
         })
         .catch((err) => {
@@ -189,7 +161,7 @@ const PelangganView = () => {
                         {Array.isArray(customers) && customers.length > 0 ? (
                             customers.map((c, index) => (
                                 <tr key={c.id || index}>
-                                    <td>{index + 1}</td>
+                                    <td>{c.id}</td>
                                     <td>{c.name || c.nama}</td>
                                     <td>{c.email}</td>
                                     <td>{c.phone || "-"}</td>
@@ -215,41 +187,65 @@ const PelangganView = () => {
 function AdminApp() {
     // Cek localStorage: Apakah user punya "tiket" masuk admin?
     const [isAuthenticated, setIsAuthenticated] = useState(
-        localStorage.getItem("adminToken") === "true" || localStorage.getItem("token") !== null
-    );
+    localStorage.getItem("adminToken") === "true");
+    const [adminUser, setAdminUser] = useState({
+        name: localStorage.getItem("adminName") || "Admin",
+        email: localStorage.getItem("adminEmail") || "",
+    });
+
     const [activeView, setActiveView] = useState("dashboard");
+    // 1. STATE DULU
+    const [cameras, setCameras] = useState([]);
+    const [equipments, setEquipments] = useState([]);
 
-    // ==========================================
-// 🛠️ PERBAIKAN KELOMPOK 3-3D: STATE UTAMA (Ditaruh di paling atas AdminApp)
-// ==========================================
-const [cameras, setCameras] = useState([]);
-const [loading, setLoading] = useState(true);
-const [search, setSearch] = useState("");
+    // 2. BARU TURUNAN DATA
+    const allProducts = [
+        ...cameras.map(c => ({ ...c,  itemType: "camera" })),
+        ...equipments.map(e => ({ ...e, itemType: "equipment" }))
+    ];
+    const [loading, setLoading] = useState(true);
+    const [search, setSearch] = useState("");
 
-// Fungsi untuk mengambil data kamera dari API
-const fetchCameras = async (keyword = "") => {
+    // Fungsi untuk mengambil data kamera dari API
+    const fetchCameras = async () => {
     try {
-        const { data } = await axios.get(`/api/cameras?search=${keyword}`);
-        setCameras(data.data);
-        setLoading(false);
+        const { data } = await getCameras();
+        setCameras(data.data || data);
     } catch (err) {
+        console.log(err);
+    } finally {
         setLoading(false);
     }
 };
-
-// Ambil data kamera saat AdminApp pertama kali dimuat
+    const fetchEquipments = async () => {
+    try {
+        const { data } = await getEquipments();
+        const items = data.data || data;
+        console.log("CATEGORY ITEM 0:", items[0]?.category);
+        setEquipments(items);
+    } catch (err) {
+        console.log("Gagal load equipments", err);
+    }
+};
+//Tunggu sampai isAuthenticated = true
 useEffect(() => {
+    if (!isAuthenticated) return;
     fetchCameras();
-}, []);
+    fetchEquipments();
+}, [isAuthenticated]);
 
 // Fungsi hapus kamera dari database
 const handleDelete = async (id) => {
     if (!window.confirm("Yakin hapus barang ini?")) return;
+    const isCamera = isCameraItem(item);
     try {
-        await axios.delete(`/api/cameras/${id}`, {
-            headers: { Authorization: "Bearer " + localStorage.getItem("token") }
-        });
-        setCameras(cameras.filter(c => c.id !== id));
+        if (isCamera) {
+            await deleteCamera(item.id);
+            setCameras((prev) => prev.filter((c) => c.id !== item.id));
+        } else {
+            await deleteEquipment(item.id); // ⬅️ import ini dari apiadmin.js
+            setEquipments((prev) => prev.filter((e) => e.id !== item.id));
+        }
         alert("✅ Barang berhasil dihapus!");
     } catch (err) {
         alert("❌ " + (err.response?.data?.message || err.message));
@@ -257,13 +253,10 @@ const handleDelete = async (id) => {
 };
 
 // ==========================================================================================
-// ⭐ KELOMPOK 3-3D: FUNGSI EDIT CERDAS GABUNGAN (CAMERAS & EQUIPMENTS) ⭐
+// FUNGSI EDIT CERDAS GABUNGAN (CAMERAS & EQUIPMENTS) ⭐
 // ==========================================================================================
 const handleEditProduct = async (item) => {
-    // 📌 DETEKSI ASAL BARANG: Apakah dari tabel camera atau equipment?
-    // Kita cek properti uniknya (misal jika ada serial_number atau asal === 'camera')
-    const isCamera = item.serial_number !== undefined || item.asal === 'camera';
-    
+    const isCamera = isCameraItem(item);
     // ---- [1. PROMPT UNTUK NAMA BARANG] ----
     const newName = window.prompt("✏️ Masukkan NAMA BARANG baru:", item.name || item.type);
     if (newName === null) return; 
@@ -300,15 +293,6 @@ const handleEditProduct = async (item) => {
         return;
     }
 
-    // ---- [5. PROMPT UNTUK DEPOSIT] ----
-    const inputDeposit = window.prompt("✏️ Masukkan nominal DEPOSIT (Angka saja):", item.deposit || 0);
-    if (inputDeposit === null) return;
-    const newDeposit = parseInt(inputDeposit, 10);
-    if (isNaN(newDeposit) || newDeposit < 0) {
-        alert("❌ Deposit harus berupa angka yang valid!");
-        return;
-    }
-
     // ---- [6. PROMPT UNTUK STOK BARANG] ----
     const inputStok = window.prompt("✏️ Masukkan JUMLAH STOK baru (Angka saja):", item.stock || 0);
     if (inputStok === null) return;
@@ -324,28 +308,18 @@ const handleEditProduct = async (item) => {
         brand: item.brand || "", 
         type: newType,
         price_per_day: newPrice,
-        deposit: newDeposit,
-        stock: newStock
+        stock: newStock,
+        ...(isCamera && { serial_number: newSerialNumber }),
+
+        // Equipment
+        equipment_category_id: item.equipment_category_id || null,
+        specification: item.specification || "",
+        image: item.image || null,
     };
-
-    // 📌 Jika barangnya kamera, ikut sertakan serial_number ke data payload
-    if (isCamera) {
-        updatedData.serial_number = newSerialNumber;
-    }
-    // Jika kamera tembak ke /api/cameras, jika equipment tembak ke /api/equipments
-    const apiUrl = isCamera ? `/api/cameras/${item.id}` : `/api/equipments/${item.id}`;
-
+    
     try {
-        // Tembak API menggunakan method POST + Spoofing PUT agar aman di Laravel
-        await axios.post(apiUrl, {
-            ...updatedData,
-            _method: 'PUT' 
-        }, {
-            headers: { Authorization: "Bearer " + localStorage.getItem("token") }
-        });
-        // Ganti 'cameras' di bawah dengan nama state gabungan yang kalian pakai merender tabel
-        setCameras(cameras.map(c => (c.id === item.id && (isCamera === (c.serial_number !== undefined || c.asal === 'camera')) ? { ...c, ...updatedData } : c)));
-        
+        await updateProduct(item.id, isCamera, updatedData);
+        setCameras((prev) => prev.map((c) => (c.id === item.id ? { ...c, ...updatedData } : c)));
         alert(`✅ Data ${isCamera ? 'Kamera' : 'Equipment'} berhasil diperbarui!`);
     } catch (err) {
         alert("❌ Gagal mengupdate data: " + (err.response?.data?.message || err.message));
@@ -373,11 +347,7 @@ const handleEditProduct = async (item) => {
     //DI SINI NYAWANYA! FUNGSI UNTUK MENARIK DATA DARI DATABASE RENTALS ⚡ ---//
     useEffect(() => {
         if (isAuthenticated && activeView === "dashboard") {
-            const token = localStorage.getItem("adminToken") || localStorage.getItem("token");
-            
-            axios.get("/api/admin/dashboard-stats", {
-                headers: { Authorization: "Bearer " + token }
-            })
+            getDashboardStats()
             .then(({ data }) => {
                 setStats({
                     total_barang: data.total_barang || 0,
@@ -396,16 +366,6 @@ const handleEditProduct = async (item) => {
         }
     }, [activeView, isAuthenticated]);
 
-    // Jika belum login, tampilkan pesan proteksi
-    if (!isAuthenticated) {
-        return (
-            <div style={{ padding: "100px", textAlign: "center" }}>
-                <h2>Sesi Login Habis / Anda Belum Login</h2>
-                <p style={{ color: "gray", marginTop: "10px" }}>Silakan login kembali melalui halaman utama.</p>
-            </div>
-        );
-    }
-
     // --- HALAMAN LOGIN ADMIN (Fallback jika user masuk langsung via /admin) ---
     if (!isAuthenticated) {
         const handleLogin = async (e) => {
@@ -414,11 +374,18 @@ const handleEditProduct = async (item) => {
             const password = e.target.password.value;
             try {
                 // Tembak API login backend
-                const { data } = await axios.post("/api/admin/login", { email, password });
+                const { data } = await loginAdmin(email, password);
                 
                 // Simpan token asli dari database dan set status login
                 localStorage.setItem("token", data.token);
-                localStorage.setItem("adminToken", "true"); 
+                localStorage.setItem("adminToken", "true");
+                localStorage.setItem("adminName", data.user?.name || data.name || "Admin");  
+                localStorage.setItem("adminEmail", data.user?.email || data.email || "");
+                setAdminUser({                                          // ⬅️ tambah ini
+                    name: data.user?.name || data.name || "Admin",
+                    email: data.user?.email || data.email || "",
+                }); 
+                console.log("TOKEN SETELAH DISIMPAN:", localStorage.getItem("token")); 
                 setIsAuthenticated(true);
                 
                 alert("✅ Login Admin Berhasil!");
@@ -537,37 +504,39 @@ const handleEditProduct = async (item) => {
                     </div>
                 </div>
                 <div className="user-profile">
-                    <div className="user-av">AD</div>
-                    <div>
-                        <div style={{ fontSize: "13px", fontWeight: 700 }}>
-                            Admin Utama
+                    <div className="user-av">{adminUser.name?.charAt(0).toUpperCase() || "A"}</div>
+                        <div className="user-info">
+                            <div style={{ fontSize: "13px", fontWeight: 700 }}>{adminUser.name}</div>
+                            <div style={{ fontSize: "11px", color: "rgba(255,255,255,0.5)", whiteSpace: "nowrap",      // ⬅️ tambah
+        overflow: "hidden",        // ⬅️ tambah
+        textOverflow: "ellipsis",}}>{adminUser.email}</div>           
                         </div>
-                        <div
-                            style={{
-                                fontSize: "11px",
-                                color: "rgba(255,255,255,0.5)",
-                            }}
-                        >
-                            admin@yukirent.com
-                        </div>
-                    </div>
                     {/* TOMBOL LOGOUT */}
                     <button
                         style={{
-                            marginLeft: "auto",
+                            marginLeft: "2px",
                             background: "transparent",
+                            background: "#ef4444",
                             border: "none",
-                            color: "#fee2e2",
+                            borderRadius: "6px",   
+                            color: "#fff", 
                             cursor: "pointer",
+                            fontWeight: 600, 
+                            fontSize: "12px",
+                            padding: "5px 12px",
+                            flexShrink: 0,     
                         }}
                         onClick={() => {
                             localStorage.removeItem("adminToken"); // Hapus memori login admin
+                            localStorage.removeItem("token"); // Hapus token pelanggan juga untuk keamanan
+                            localStorage.removeItem("adminName");  
+                            localStorage.removeItem("adminEmail");
                             setIsAuthenticated(false);
                             window.location.href = "/"; // Arahkan kembali ke halaman depan
                         }}
                         title="Keluar / Logout"
                     >
-                        🚪
+                        Logout
                     </button>
                 </div>
             </aside>
@@ -576,7 +545,6 @@ const handleEditProduct = async (item) => {
             <main className="main-content">
                 <header className="topbar">
                     <div className="page-title">{titles[activeView]}</div>
-                    <div>
                         <button
                             className="btn btn-outline"
                             style={{ padding: "6px 12px", fontSize: "12px" }}
@@ -584,7 +552,6 @@ const handleEditProduct = async (item) => {
                         >
                             Buka Web Utama ↗
                         </button>
-                    </div>
                 </header>
 
                 <div className="content-area">
@@ -592,11 +559,13 @@ const handleEditProduct = async (item) => {
                     {activeView === "dashboard" && (
                         <div>
                             <div className="stats-grid">
-                                <div className="stat-card">
+                                    <div className="stat-card">
                                     <div className="stat-icon">📷</div>
                                     <div className="stat-info">
                                         <h4>TOTAL BARANG</h4>
-                                        <div className="num">{stats.total_barang || 0}</div>
+                                        <div className="num">
+                                            {loadingStats ? "..." : stats.total_barang}
+                                        </div>
                                     </div>
                                 </div>
                                 <div className="stat-card">
@@ -611,7 +580,9 @@ const handleEditProduct = async (item) => {
                                     </div>
                                     <div className="stat-info">
                                         <h4>SEDANG DISEWA</h4>
-                                        <div className="num">{stats.sedang_disewa || 0}</div>
+                                        <div className="num">
+                                            {loadingStats ? "..." : stats.sedang_disewa}
+                                        </div>
                                     </div>
                                 </div>
                                 <div className="stat-card">
@@ -626,7 +597,9 @@ const handleEditProduct = async (item) => {
                                     </div>
                                     <div className="stat-info">
                                         <h4>MENUNGGU PICKUP</h4>
-                                        <div className="num">{stats.menunggu_pickup || 0}</div>
+                                        <div className="num">
+                                            {loadingStats ? "..." : stats.menunggu_pickup}  
+                                        </div>
                                     </div>
                                 </div>
                                 <div className="stat-card">
@@ -642,13 +615,12 @@ const handleEditProduct = async (item) => {
                                     <div className="stat-info">
                                         <h4>PENDAPATAN BULAN INI</h4>
                                         <div className="num">
-                                            Rp {typeof stats.pendapatan === 'number' 
-                                    ? stats.pendapatan.toLocaleString("id-ID") 
-                                    : (parseInt(stats.pendapatan) || 0).toLocaleString("id-ID")}
-                            </div>
+                                            {loadingStats ? "..." : rp(stats.pendapatan)}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
+
                             <div className="card">
                                 <div
                                     style={{
@@ -720,19 +692,14 @@ const handleEditProduct = async (item) => {
                                                         <td>{b.start_date || b.tanggal_sewa || "-"} s/d {b.end_date || ""}</td>
                                                         
                                                         {/* BADGE STATUS */}
-                                                        <td>
-                                                            <span className={`badge-status ${
-                                                                b.status === 'Selesai' || b.status === 'Aktif / Disewa' ? 'st-success' : 'st-pending'
-                                                            }`}>
-                                                                {b.status}
-                                                            </span>
+                                                        <td> <span className={dashboardStatusClass(b.status)}>
+                                                            {b.status}
+                                                        </span>
                                                         </td>
-                                                        
+                                                                                                        
                                                         {/* TOTAL HARGA FORMAT RUPIAH */}
                                                         <td>
-                                                            <strong>
-                                                                Rp {b.total_price ? b.total_price.toLocaleString("id-ID") : "0"}
-                                                            </strong>
+                                                            <strong>{rp(b.total_price)}</strong>
                                                         </td>
                                                     </tr>
                                                 ))
@@ -782,64 +749,40 @@ const handleEditProduct = async (item) => {
                                                             <th>Nama Barang</th>
                                                             <th>Kategori</th>
                                                             <th>Harga / Hari</th>
-                                                            <th>Deposit</th>
                                                             <th>Stok</th>
                                                             <th>Aksi</th>
                                                         </tr>
                                                     </thead>
                                                     <tbody>
-                                                        {cameras.filter(c => {
-                                                            const nama = (c.name || c.type || "").toLowerCase();
-                                                            const brand = (c.brand || "").toLowerCase();
-                                                            return nama.includes(search.toLowerCase()) || brand.includes(search.toLowerCase());
-                                                        }).length === 0 ? (
-                                                            <tr>
-                                                                <td colSpan="6" style={{ textAlign: "center", color: "var(--muted)", padding: "24px" }}>
-                                                                    Tidak ada data yang cocok
-                                                                </td>
-                                                            </tr>
-                                                        ) : cameras.filter(c => {
-                                                            const nama = (c.name || c.type || "").toLowerCase();
-                                                            const brand = (c.brand || "").toLowerCase();
-                                                            return nama.includes(search.toLowerCase()) || brand.includes(search.toLowerCase());
-                                                        }).map(c => (
-                                                            <tr key={c.id}>
-                                                                <td>{c.id}</td>
+                                                        {filterCameras(allProducts, search).map(item => (
+                                                            <tr key={`${item.itemType}-${item.id}`}>
+                                                                <td>{item.id}</td>
 
-                                                                {/* 2. NAMA BARANG */}
                                                                 <td>
-                                                                    <strong>{c.name || c.type}</strong>
+                                                                    <strong>{item.name}</strong>
                                                                     <br />
-                                                                    <span style={{ fontSize: "11px", color: "var(--muted)" }}>Brand: {c.brand}</span>
-                                                                </td>
-                                                                {/* 3. KATEGORI */}
-                                                                <td>{c.type}</td>
-
-                                                                {/* 4. HARGA / HARI */}
-                                                                <td>{typeof rp === 'function' ? rp(Math.round(c.price_per_day)) : `Rp ${Math.round(c.price_per_day).toLocaleString('id-ID')}`}</td>
-
-                                                                {/* 🛠️ PERBAIKAN: 5. DEPOSIT (Baris baru yang sebelumnya hilang) */}
-                                                                <td>{typeof rp === 'function' ? rp(Math.round(c.deposit || 0)) : `Rp ${Math.round(c.deposit || 0).toLocaleString('id-ID')}`}</td>
-
-                                                                {/* 6. STOK */}
-                                                                <td>
-                                                                    <span style={{
-                                                                        color: c.stock > 0 ? "#1a5e2e" : "#8b2222",
-                                                                        fontWeight: 600
-                                                                    }}>
-                                                                        {c.stock} unit
+                                                                    <span style={{ fontSize: "11px", color: "gray" }}>
+                                                                        {item.itemType === "camera" ? `Serial: ${item.serial_number || "-"}` : item.specification || "-"}
                                                                     </span>
                                                                 </td>
+
+                                                                <td>{item.category?.name || item.type || "-"}</td>
+
+                                                                <td>{rp(item.price_per_day)}</td>
+
+                                                                <td>{item.stock}</td>
+
                                                                 <td>
-                                                                    <button 
-                                                                        className="btn-edit" 
-                                                                        onClick={() => handleEditProduct(c)}
+                                                                    <button
+                                                                        className="btn-edit"
+                                                                        onClick={() => handleEditProduct(item)}
                                                                     >
                                                                         Edit
                                                                     </button>
+
                                                                     <button
-                                                                        className="btn-danger"
-                                                                        onClick={() => handleDelete(c.id)}
+                                                                        className="btn-delete"
+                                                                        onClick={() => handleDelete(item)}
                                                                     >
                                                                         Hapus
                                                                     </button>
@@ -917,10 +860,6 @@ const handleEditProduct = async (item) => {
                                     <div className="form-row">
                                         <div className="form-group">
                                             <label>Harga Sewa (Per Hari)</label>
-                                            <input type="number" required />
-                                        </div>
-                                        <div className="form-group">
-                                            <label>Biaya Deposit</label>
                                             <input type="number" required />
                                         </div>
                                     </div>

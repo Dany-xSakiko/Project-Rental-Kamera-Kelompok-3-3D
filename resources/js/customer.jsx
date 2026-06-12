@@ -2,10 +2,23 @@ import React, { useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import "../css/app.css"; // Pastikan file app.css berisi SEMUA css dari file aslimu
 import { products } from "./data";
-import axios from "axios";
 
-// --- FORMAT RUPIAH ---
-const rp = (n) => "Rp " + n.toLocaleString("id-ID");
+//import berikut (API calls & Mappers):
+import {
+    getKatalogProduk,
+    postRental,
+    postLogin,
+    postRegister,
+    putProfile,
+    searchCameras,
+} from "./services/apicustomer.js";
+
+import {
+    rp,
+    mapCamera,
+    mapEquipment,
+    mapSearchResult,
+} from "./helpers/customerMappers.js";
 
 // ==========================================
 // 1. KOMPONEN NAVBAR & FOOTER
@@ -60,7 +73,9 @@ const Navbar = ({ setActivePage, cartCount, user, setUser, setSelectedProduct, o
                     >
                         {user.initials}
                     </div>
+                    
                 </div>
+                
             ) : (
                 <span
                     className="nav-a nav-auth"
@@ -118,33 +133,10 @@ const HomePage = ({ setActivePage, setSelectedProduct }) => {
     const [hotItems, setHotItems] = useState([]);
 
     useEffect(() => {
-        axios.get("/api/katalog-produk")
+        getKatalogProduk()
             .then(({ data }) => {
-                const cameras = data.cameras.map(c => ({
-                    id:      c.id,
-                    type:    "camera",
-                    brand:   c.brand,
-                    name:    c.name || c.type,
-                    price:   Math.round(c.price_per_day),
-                    deposit: Math.round(c.price_per_day) * 2,
-                    cat:     c.type,
-                    icon:    <img src={`/storage/${c.image}`} alt={c.name} className="hot-card-img"/>,
-                    desc:    c.description,
-                    hot:     true,
-                }));
-
-                const equipments = data.equipments.map(e => ({
-                    id:      e.id,
-                    type:    "equipment",
-                    brand:   e.brand,
-                    name:    e.name,
-                    price:   Math.round(e.price_per_day),
-                    deposit: Math.round(e.price_per_day) * 2,
-                    cat:     "Aksesoris",
-                    icon:    <img src={`/storage/${e.image}`} alt={e.name} className="hot-card-img"/>,
-                    desc:    e.specification,
-                    hot:     false,
-                }));
+                const cameras = data.cameras.map(c => mapCamera(c, "hot-card-img"));
+                const equipments = data.equipments.map(e => mapEquipment(e, "hot-card-img"));
 
                 // Ambil 4 item pertama yang hot
                 const allHot = [...cameras, ...equipments].filter(p => p.hot);
@@ -212,13 +204,7 @@ const HomePage = ({ setActivePage, setSelectedProduct }) => {
                                 <div className="pcard-thumb">
                                     <div className="pcard-thumb-inner">
                                         {p.icon}
-                                    </div>
-                                    <div className="pcard-badges">
-                                        {p.hot && (
-                                            <span className="badge badge-hot">
-                                                🔥 Hot
-                                            </span>
-                                        )}
+                                        <img src={p.imgSrc} className={p.imgClass} />
                                     </div>
                                 </div>
                                 <div className="pcard-body">
@@ -248,35 +234,11 @@ const CatalogPage = ({ setActivePage, setSelectedProduct }) => {
 
     // Ambil data dari API waktu halaman dibuka
     useEffect(() => {
-        axios.get("/api/katalog-produk")
+        getKatalogProduk()
             .then(({ data }) => {
                 // Gabungkan cameras dan equipments
-                const cameras = data.cameras.map(c => ({
-                    id:      c.id,
-                    type:    "camera",
-                    brand:   c.brand,
-                    name:    c.name || c.type, // ← pakai c.name
-                    price:   Math.round(c.price_per_day), // ← bulatkan
-                    deposit: Math.round(c.price_per_day) * 2,
-                    cat:     c.type,
-                    icon:    <img src={`/storage/${c.image}`} alt={c.name} className="camera-card-img"/>,
-                    desc:    c.description,
-                    hot:     true,
-                }));
-
-                const equipments = data.equipments.map(e => ({
-                    id:      e.id,
-                    type:    "equipment",
-                    brand:   e.brand,
-                    name:    e.name,
-                    price:   Math.round(e.price_per_day), // ← bulatkan
-                    deposit: Math.round(e.price_per_day) * 2,
-                    cat:     "Aksesoris",
-                    icon:    <img src={`/storage/${e.image}`} alt={e.name} className="equipment-card-img"/>,
-                    desc:    e.description,
-                    desc:    e.specification,
-                    hot:     false,
-                }));
+                const cameras = data.cameras.map(c => mapCamera(c, "camera-card-img"));
+                const equipments = data.equipments.map(e => mapEquipment(e, "equipment-card-img"));
 
                 setProducts([...cameras, ...equipments]);
                 setLoading(false);
@@ -319,7 +281,6 @@ const CatalogPage = ({ setActivePage, setSelectedProduct }) => {
                             ))}
                         </div>
                     </aside>
-
                     <div className="cat-main">
                         <div className="cat-grid">
                             {filteredProducts.map((p) => (
@@ -332,14 +293,15 @@ const CatalogPage = ({ setActivePage, setSelectedProduct }) => {
                                     }}
                                 >
                                     <div className="pcard-thumb">
-                                        <div className="pcard-thumb-inner">{p.icon}</div>
+                                        <div className="pcard-thumb-inner">
+                                            <img src={p.imgSrc} className={p.imgClass} />
+                                        </div>  
                                     </div>
                                     <div className="pcard-body">
                                         <div className="pcard-brand">{p.brand}</div>
                                         <div className="pcard-name">{p.name}</div>
                                         <div className="pcard-price">
-                                            {rp(p.price)}
-                                            <span className="pcard-price-sub">/hari</span>
+                                            {rp(p.price)}<span className="pcard-price-sub">/hari</span>
                                         </div>
                                     </div>
                                 </div>
@@ -385,7 +347,7 @@ const DetailPage = ({ product, addToCart, setActivePage }) => {
                     <div>
                         <div className="detail-gallery">
                             <div className="detail-gallery-icon">
-                                {product.icon}
+                                <img src={product.imgSrc} className={product.imgClass} />
                             </div>
                         </div>
 
@@ -430,10 +392,6 @@ const DetailPage = ({ product, addToCart, setActivePage }) => {
                                     • KTP asli wajib ditinggal sebagai jaminan.
                                 </p>
                                 <p>
-                                    • Deposit dibayar lunas (dikembalikan
-                                    setelah pengecekan).
-                                </p>
-                                <p>
                                     • Keterlambatan pengembalian: denda Rp
                                     50.000 per jam.
                                 </p>
@@ -449,9 +407,6 @@ const DetailPage = ({ product, addToCart, setActivePage }) => {
                                 {rp(product.price)}
                             </span>
                             <span className="detail-price-per">/ hari</span>
-                            <div className="detail-deposit">
-                                Deposit: {rp(product.deposit)}
-                            </div>
                         </div>
 
                         <div className="booking-box">
@@ -494,17 +449,12 @@ const DetailPage = ({ product, addToCart, setActivePage }) => {
                                             : "Rp 0"}
                                     </span>
                                 </div>
-                                <div className="sum-row">
-                                    <span>Deposit</span>
-                                    <span>{rp(product.deposit)}</span>
-                                </div>
                                 <div className="sum-row total">
                                     <span>Total Bayar</span>
                                     <span>
                                         {days > 0
                                             ? rp(
-                                                  product.price * days +
-                                                    product.deposit,
+                                                  product.price * days 
                                                 )
                                             : "—"}
                                     </span>
@@ -555,18 +505,7 @@ const CartPage = ({ cart, removeFromCart, clearCart, setActivePage }) => {
             const total_price = totalSewa;
 
             // Kirim ke API /api/rentals (butuh token login)
-            await axios.post("/api/rentals", {
-                start_date,
-                end_date,
-                total_days,
-                total_price,
-                items,
-            }, {
-                headers: {
-                    Authorization: "Bearer " + localStorage.getItem("token"),
-                    Accept: "application/json",
-                }
-            });
+            await postRental({ start_date, end_date, total_days, total_price, items });
 
             setIsProcessing(false);
             clearCart(); // Kosongkan keranjang
@@ -607,7 +546,7 @@ const CartPage = ({ cart, removeFromCart, clearCart, setActivePage }) => {
                             {cart.map((item, index) => (
                                 <div key={index} className="cart-item">
                                     <div className="cart-thumb">
-                                        {item.p.icon}
+                                        <img src={item.p.imgSrc} className={item.p.imgClass} />
                                     </div>
                                     <div>
                                         <div className="cart-item-name">
@@ -715,8 +654,8 @@ const AuthPage = ({ setUser, setActivePage }) => {
                 return;
             }
 
-            // Login pakai axios
-            const { data } = await axios.post("/api/login", { email, password });
+            // Melakukan permintaan login pengguna ke server
+            const { data } = await postLogin({ email, password });
 
             localStorage.setItem("token", data.token);
             setUser({
@@ -731,11 +670,8 @@ const AuthPage = ({ setUser, setActivePage }) => {
             const phone                 = e.target.phone.value.trim();
             const password_confirmation = e.target.password.value;
 
-            // Register pakai axios
-            const { data } = await axios.post("/api/register", {
-                name, email, password, password_confirmation,
-                phone
-            });
+            // Melakukan permintaan registrasi pengguna ke server
+            const { data } = await postRegister({ name, email, password, password_confirmation, phone });
 
             localStorage.setItem("token", data.token);
             setUser({
@@ -798,6 +734,27 @@ const AuthPage = ({ setUser, setActivePage }) => {
                     </p>
                 </div>
                 <div className="auth-panel-right">
+                    {/* ← DIUBAH: posisi absolut pojok kanan atas */}
+                        {isLogin && (
+                            <button
+                                type="button"
+                                style={{
+                                    display: "block",
+                                    marginLeft: "auto",
+                                    marginRight: "0",          
+                                    marginBottom: "16px",
+                                    background: "transparent",
+                                    border: "1px solid rgba(0,0,0,0.15)",
+                                    borderRadius: "20px",
+                                    color: "#888",
+                                    cursor: "pointer",
+                                }}
+    
+                                onClick={() => window.location.href = "/admin"}
+                            >
+                                Login Admin
+                            </button>
+                        )}
                     <h2>{isLogin ? "Masuk ke Akun" : "Buat Akun Baru"}</h2>
                     <p className="auth-tagline">
                         {isLogin ? "Belum punya akun? " : "Sudah punya akun? "}
@@ -893,13 +850,28 @@ const ProfilePage = ({ user, setUser, setActivePage }) => {
                         </div>
                         <div
                             className="ph-tab"
-                            style={{ color: "#eb5757", marginLeft: "auto" }}
+                            style={{
+                            marginLeft: "auto",
+                            background: "#ef4444",
+                            border: "none",
+                            borderRadius: "20px",      
+                            color: "#fff",
+                            cursor: "pointer",
+                            fontWeight: 600,
+                            fontSize: "12px",
+                            padding: "6px 14px",     
+                            flexShrink: 0,
+                            lineHeight: "1",           
+                            display: "flex",           
+                            alignItems: "center",      
+                            justifyContent: "center",     
+                        }}
                             onClick={() => {
                                 setUser(null);
                                 setActivePage("home");
                             }}
                         >
-                            Keluar 🚪
+                            Logout
                         </div>
                     </div>
                 </div>
@@ -960,15 +932,7 @@ const ProfilePage = ({ user, setUser, setActivePage }) => {
                                 const name  = document.getElementById("profileName").value.trim();
                                 const email = document.getElementById("profileEmail").value.trim();
                                 try {
-                                    const res = await fetch("/api/profile", {
-                                        method: "PUT",
-                                        headers: {
-                                            "Content-Type": "application/json",
-                                            "Accept": "application/json",
-                                            "Authorization": "Bearer " + localStorage.getItem("token"),
-                                        },
-                                        body: JSON.stringify({ name, email }),
-                                    });
+                                    const res = await putProfile({ name, email });
                                     const data = await res.json();
                                     if (!res.ok) throw new Error(data.message || "Gagal menyimpan.");
                                     setUser({
@@ -1018,16 +982,10 @@ const SearchPage = ({ results, setActivePage, setSelectedProduct }) => {
                                 key={c.id}
                                 className="pcard"
                                 onClick={() => {
-                                    setSelectedProduct({
-                                        id:      c.id,
-                                        type:    "camera",
-                                        brand:   c.brand,
-                                        name:    c.name || c.type,
-                                        price:   Math.round(c.price_per_day),
-                                        deposit: Math.round(c.price_per_day) * 2,
-                                        icon:    <img src={`/storage/${c.image}`} alt={c.name} className="camera-card-img" />,
-                                        desc:    c.description,
-                                    });
+                                    const p = c.serial_number !== undefined
+                                ? mapCamera(c, "camera-card-img")
+                                : mapEquipment(c, "equipment-card-img");
+                                    setSelectedProduct(p);
                                     setActivePage("detail");
                                 }}
                             >
@@ -1084,8 +1042,10 @@ export default function App() {
     const handleSearch = async (keyword) => {
         if (!keyword.trim()) return;
         try {
-            const { data } = await axios.get(`/api/cameras?search=${keyword}`);
-            setSearchResults(data.data);
+            const [cameraRes, equipmentRes] = await searchCameras(keyword); //
+            const cameras    = cameraRes.data?.data    || cameraRes.data    || [];
+            const equipments = equipmentRes.data?.data || equipmentRes.data || [];
+            setSearchResults([...cameras, ...equipments]);
             setActivePage("search");
         } catch (err) {
             console.error(err);
@@ -1175,6 +1135,8 @@ export default function App() {
 // RENDER KE DOM (Hanya untuk Laravel Vite)
 // ==========================================
 if (document.getElementById("root")) {
-    const root = createRoot(document.getElementById("root"));
-    root.render(<App />);
+    if (!window.customerRoot) {
+        window.customerRoot = createRoot(document.getElementById("root"));
+    }
+window.customerRoot.render(<App />);
 }
