@@ -62,8 +62,8 @@ class RentalController extends Controller
             $itemsToSave = [];
 
             // logika kalkulasi harga item dan pengurangan stok barang
-            foreach ($request->items as $item){
-                if (!empty($item['camera_id'])){
+            foreach ($request->items as $item) {
+                if (!empty($item['camera_id'])) {
                     $product = Camera::lockForUpdate()->find($item['camera_id']);
                 } else {
                     $product = Equipment::lockForUpdate()->find($item['equipment_id']);
@@ -89,7 +89,8 @@ class RentalController extends Controller
                     'equipment_id' => $item['equipment_id'] ?? null,
                     'price_per_day' => $pricePerDay,
                     'quantity' => $item['quantity'],
-                    'total_price' => $itemTotalPrice
+                    'total_price' => $itemTotalPrice,
+                    'status' => 'Menunggu Pembayaran',
                 ];
             }
 
@@ -101,10 +102,10 @@ class RentalController extends Controller
                 'end_date' => $request->end_date,
                 'total_days' => $totalDays,
                 'total_price' => $grossTotalPrice,
-                'status' => 'Aktif / Disewa',
+                'status' => 'Menunggu Pembayaran',
             ]);
 
-              // Simpan items ke tabel rental_items
+            // Simpan items ke tabel rental_items
             foreach ($itemsToSave as $itemData) {
                 \App\Models\RentalItem::create([
                     'rental_id' => $rental->id,
@@ -127,7 +128,7 @@ class RentalController extends Controller
                     'total_akhir_wajib_bayar' => $grossTotalPrice
                 ]
             ], 201);
-            
+
         } catch (\Exception $e) {
             // Jika ada yang error atau stok kosong, kembalikan data stok awal semula
             DB::rollBack();
@@ -138,6 +139,7 @@ class RentalController extends Controller
             ], 400);
         }
     }
+
 
     /**
      * Display the specified rental.
@@ -151,8 +153,8 @@ class RentalController extends Controller
         ])->findOrFail($id);
 
         if ($request->user()->role !== 'admin' && $rental->user_id !== $request->user()->id) {
-        return response()->json(['message' => 'Forbidden'], 403);
-    }
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
 
         return response()->json($rental);
     }
@@ -163,9 +165,9 @@ class RentalController extends Controller
     public function updateStatus(Request $request, string $id)
     {
         if ($request->user()->role !== 'admin') {
-        return response()->json(['message' => 'Forbidden'], 403);
-    }
-    
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
         $rental = Rental::with('rentalItems')->findOrFail($id);
 
         $request->validate([
@@ -207,7 +209,7 @@ class RentalController extends Controller
 
             // KONDISI B: JIKA TRANSAKSI 'Dibatalkan' (Stok dikembalikan karena batal sewa)
             if ($newStatus === 'Dibatalkan' && $oldStatus !== 'Dibatalkan' && $oldStatus !== 'Selesai') {
-                
+
                 // 🔥 KEMBALIKAN STOK KARENA PEMBATALAN TRANSAKSI
                 foreach ($rental->rentalItems as $item) {
                     if (!empty($item->camera_id)) {
@@ -230,7 +232,7 @@ class RentalController extends Controller
             return response()->json([
                 'message' => 'Status rental dan kalkulasi denda berhasil diperbarui!',
                 'data' => $rental->load('rentalItems.camera', 'rentalItems.equipment'),
-                'info_keterlambatan'=> [
+                'info_keterlambatan' => [
                     'total_denda_keterlambatan' => $fine
                 ]
             ]);
@@ -244,6 +246,28 @@ class RentalController extends Controller
         }
     }
 
+    public function checkout(Request $request, string $id)
+    {
+        $rental = Rental::findOrFail($id);
+
+        if ($rental->user_id !== $request->user()->id) {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
+        if ($rental->status !== 'Menunggu Pembayaran') {
+            return response()->json([
+                'message' => 'Rental ini tidak bisa dibayar lagi (status: ' . $rental->status . ').'
+            ], 400);
+        }
+
+        $rental->update(['status' => 'Aktif / Disewa']);
+
+        return response()->json([
+            'message' => 'Pembayaran berhasil dikonfirmasi!',
+            'data' => $rental->load('rentalItems.camera', 'rentalItems.equipment'),
+        ]);
+    }
+
     /**
      * Remove the specified rental.
      */
@@ -254,23 +278,23 @@ class RentalController extends Controller
         if ($request->user()->role !== 'admin' && $rental->user_id !== $request->user()->id) {
             return response()->json(['message' => 'Forbidden'], 403);
         }
-        
-        DB::transaction(function () use ($rental) {
-        if (!in_array($rental->status, ['Selesai', 'Dibatalkan'])) {
-            foreach ($rental->rentalItems as $item) {
-                if ($item->camera_id) {
-                    Camera::where('id', $item->camera_id)->increment('stock', $item->quantity);
-                }
 
-                if ($item->equipment_id) {
-                    Equipment::where('id', $item->equipment_id)->increment('stock', $item->quantity);
+        DB::transaction(function () use ($rental) {
+            if (!in_array($rental->status, ['Selesai', 'Dibatalkan'])) {
+                foreach ($rental->rentalItems as $item) {
+                    if ($item->camera_id) {
+                        Camera::where('id', $item->camera_id)->increment('stock', $item->quantity);
+                    }
+
+                    if ($item->equipment_id) {
+                        Equipment::where('id', $item->equipment_id)->increment('stock', $item->quantity);
+                    }
                 }
             }
-        }
 
-        $rental->delete();
+            $rental->delete();
         });
-        
+
         return response()->json([
             'message' => 'Rental deleted successfully'
         ]);

@@ -7,6 +7,9 @@ import { products } from "./data";
 import {
     getKatalogProduk,
     postRental,
+    checkoutRental,
+    deleteRental,
+    getMyRentals,
     postLogin,
     postRegister,
     putProfile,
@@ -327,11 +330,32 @@ const DetailPage = ({ product, addToCart, setActivePage }) => {
         days = Math.round(diff / 86400000);
     }
 
-    const handleBook = () => {
-        if (days <= 0) return alert("Pilih tanggal sewa yang valid!");
-        addToCart(product, startDate, endDate, days);
+
+    const handleBook = async () => {
+    if (days <= 0) return alert("Pilih tanggal sewa yang valid!");
+        
+    try {
+        const items = [{
+            camera_id: product.type === "camera" ? product.id : null,
+            equipment_id: product.type === "equipment" ? product.id : null,
+            price_per_day: product.price,
+            quantity: 1,
+        }];
+
+        const { data } = await postRental({
+            start_date: startDate,
+            end_date: endDate,
+            total_days: days,
+            total_price: product.price * days,
+            items,
+        });
+
+        addToCart(product, startDate, endDate, days, data.rental.id);
         setActivePage("cart");
-    };
+    } catch (err) {
+        alert("❌ " + (err.response?.data?.message || err.message));
+    }
+};
 
     if (!product) return null;
 
@@ -490,22 +514,7 @@ const CartPage = ({ cart, removeFromCart, clearCart, setActivePage }) => {
     const handleCheckout = async () => {
         setIsProcessing(true);
         try {
-            // Siapkan list item dari keranjang
-            const items = cart.map(item => ({
-                camera_id:     item.p.type === "camera" ? item.p.id : null,
-                equipment_id:  item.p.type === "equipment" ? item.p.id : null,
-                price_per_day: item.p.price,
-                quantity:      1,
-            }));
-
-            // Ambil tanggal dari item pertama di keranjang
-            const start_date  = cart[0].start;
-            const end_date    = cart[0].end;
-            const total_days  = cart[0].days;
-            const total_price = totalSewa;
-
-            // Kirim ke API /api/rentals (butuh token login)
-            await postRental({ start_date, end_date, total_days, total_price, items });
+            await Promise.all(cart.map(item => checkoutRental(item.rentalId)));
 
             setIsProcessing(false);
             clearCart(); // Kosongkan keranjang
@@ -657,12 +666,14 @@ const AuthPage = ({ setUser, setActivePage }) => {
             // Melakukan permintaan login pengguna ke server
             const { data } = await postLogin({ email, password });
 
-            localStorage.setItem("token", data.token);
-            setUser({
+            const userData = {
                 name:     data.user.name,
                 email:    data.user.email,
                 initials: data.user.name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2),
-            });
+            };
+            localStorage.setItem("token", data.token);
+            localStorage.setItem("user", JSON.stringify(userData)); // ✅ BARU
+            setUser(userData);
             setActivePage("home");
 
         } else {
@@ -673,12 +684,14 @@ const AuthPage = ({ setUser, setActivePage }) => {
             // Melakukan permintaan registrasi pengguna ke server
             const { data } = await postRegister({ name, email, password, password_confirmation, phone });
 
-            localStorage.setItem("token", data.token);
-            setUser({
+            const userData = {
                 name:     data.user.name,
                 email:    data.user.email,
                 initials: data.user.name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2),
-            });
+            };
+            localStorage.setItem("token", data.token);
+            localStorage.setItem("user", JSON.stringify(userData));
+            setUser(userData);
             alert("🎉 Akun berhasil dibuat!");
             setActivePage("home");
         }
@@ -867,6 +880,9 @@ const ProfilePage = ({ user, setUser, setActivePage }) => {
                             justifyContent: "center",     
                         }}
                             onClick={() => {
+                                localStorage.removeItem("token");
+                                localStorage.removeItem("user");
+                                localStorage.removeItem("cart");
                                 setUser(null);
                                 setActivePage("home");
                             }}
@@ -1017,25 +1033,42 @@ const SearchPage = ({ results, setActivePage, setSelectedProduct }) => {
 export default function App() {
     const [activePage, setActivePage] = useState("home");
     const [selectedProduct, setSelectedProduct] = useState(null);
-    const [cart, setCart] = useState([]);
-    const [searchResults, setSearchResults] = useState(null);
+    const [searchResults, setSearchResults] = useState([]);
+    const [cart, setCart] = useState(() => {
+        const savedCart = localStorage.getItem("cart");
+        return savedCart ? JSON.parse(savedCart) : [];
+    });
+    useEffect(() => {
+        localStorage.setItem("cart", JSON.stringify(cart));
+    }, [cart]);
 
     // State User (Ubah default ke null jika ingin simulasi belum login)
-    const [user, setUser] = useState(null);
-
+    const [user, setUser] = useState(() => {
+        const saved = localStorage.getItem("user");
+        return saved ? JSON.parse(saved) : null;
+    });
     // Fungsi Tambah Keranjang
-    const addToCart = (product, start, end, days) => {
-        setCart([...cart, { p: product, start, end, days }]);
+    const addToCart = (product, start, end, days, rentalId) => {
+        setCart([...cart, { p: product, start, end, days, rentalId }]);
     };
 
     // Fungsi Hapus Keranjang
-    const removeFromCart = (indexToRemove) => {
-    setCart(cart.filter((_, index) => index !== indexToRemove));
-    };
+    const removeFromCart = async(indexToRemove) => {
+    const item = cart[indexToRemove];
+    try {
+        if (item.rentalId) {
+            await deleteRental(item.rentalId);
+        }
+        setCart(cart.filter((_, index) => index !== indexToRemove));
+    } catch (err) {
+        alert("❌ Gagal menghapus item: " + (err.response?.data?.message || err.message));
+    }
+};
 
     // 1. FUNGSI BARU: Untuk mengosongkan keranjang setelah dibayar
     const clearCart = () => {
         setCart([]);
+        localStorage.removeItem("cart");
     };
 
     // Fungsi search — ambil dari API

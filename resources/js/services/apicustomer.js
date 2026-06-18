@@ -28,6 +28,26 @@ export const postRental = ({ start_date, end_date, total_days, total_price, item
         headers: authHeaders(),
     });
 };
+
+export const checkoutRental = (id) => {
+    return axios.patch(`/api/rentals/${id}/checkout`, {}, {
+        headers: authHeaders(),
+    });
+};
+
+export const deleteRental = (id) => {
+    return axios.delete(`/api/rentals/${id}`, {
+        headers: authHeaders(),
+    });
+};
+
+// Ambil semua rental milik user yang login (termasuk yang masih "Menunggu Pembayaran")
+// Dipakai di: App → useEffect restore cart
+export const getMyRentals = () => {
+    return axios.get("/api/rentals", {
+        headers: authHeaders(),
+    });
+};
         
 // ║  Login user, mendapatkan token + data user   ║
 // ║  Dipakai di: AuthPage              

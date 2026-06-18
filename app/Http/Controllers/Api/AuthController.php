@@ -31,8 +31,13 @@ class AuthController extends Controller
         $token = $user->createToken('auth_token')->plainTextToken;
 
         return response()->json([
-            'user' => $user,
             'token' => $token,
+            'user' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'role' => $user->role
+            ]
         ], 201);
     }
 
@@ -73,8 +78,8 @@ class AuthController extends Controller
         ]);
 
         $user = User::where('email', $request->email)
-                    ->where('role', 'admin') // Pastikan hanya admin yang bisa login    
-                    ->first();
+            ->where('role', 'admin') // Pastikan hanya admin yang bisa login    
+            ->first();
 
         if (!$user || !Hash::check($request->password, $user->password) || $user->role !== 'admin') {
             throw ValidationException::withMessages([
@@ -96,7 +101,7 @@ class AuthController extends Controller
 
     // LOGOUT
     public function logout(Request $request)
-    {   
+    {
         $request->user()->currentAccessToken()->delete();
 
         return response()->json(['message' => 'Berhasil logout.']);

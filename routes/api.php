@@ -38,6 +38,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/cameras', [CameraController::class, 'store']);
     Route::put('/cameras/{id}', [CameraController::class, 'update']);
     Route::delete('/cameras/{id}', [CameraController::class, 'destroy']);
+    Route::apiResource('equipments', EquipmentController::class);
 
     // Checkout user
     Route::post('/rentals', [RentalController::class, 'store']);
@@ -46,6 +47,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/rentals', [RentalController::class, 'index']);
     Route::get('/rentals/{id}', [RentalController::class, 'show']);
     Route::delete('/rentals/{id}', [RentalController::class, 'destroy']);
+    Route::patch('/rentals/{id}/checkout', [RentalController::class, 'checkout']);
 
     // Admin rental management
     Route::get('/admin/rentals', [RentalController::class, 'index']);
