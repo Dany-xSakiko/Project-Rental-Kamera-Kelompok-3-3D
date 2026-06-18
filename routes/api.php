@@ -26,7 +26,6 @@ Route::get('/katalog-produk', function () {
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/admin/login', [AuthController::class, 'loginAdmin']);
-Route::post('/logout', [AuthController::class, 'logout']);
 
 // Katalog publik - bisa dibaca semua
 Route::get('/cameras', [CameraController::class, 'index']);
@@ -34,6 +33,7 @@ Route::get('/cameras/{id}', [CameraController::class, 'show']);
 
 // Route yang harus login
 Route::middleware('auth:sanctum')->group(function () {
+    Route::post('/logout', [AuthController::class, 'logout']);
     // CRUD kamera - hanya admin
     Route::post('/cameras', [CameraController::class, 'store']);
     Route::put('/cameras/{id}', [CameraController::class, 'update']);
@@ -87,19 +87,19 @@ Route::middleware('auth:sanctum')->group(function () {
 
             $totalBarang = 0;
             try {
-                $totalBarang = DB::table('cameras')->count();
+                $totalBarang = DB::table('cameras')->count() + DB::table('equipments')->count();
             } catch (\Exception $e) {
                 // abaikan jika tabel salah
             }
 
             $sedangDisewa = DB::table('rentals')->where('status', 'Aktif / Disewa')->count();
-            $menungguPickup = DB::table('rentals')->where('status', 'Menunggu Pickup')->count();
+            $menungguPembayaran = DB::table('rentals')->where('status', 'Menunggu Pembayaran')->count();
             $pendapatan = DB::table('rentals')->sum('total_price' ?? 'total_harga' ?? 0);
 
             return response()->json([
                 'total_barang' => $totalBarang,
                 'sedang_disewa' => $sedangDisewa,
-                'menunggu_pickup' => $menungguPickup,
+                'menunggu_pembayaran' => $menungguPembayaran,
                 'pendapatan' => $pendapatan ? (int) $pendapatan : 0,
                 'booking_terbaru' => $bookingTerbaru
             ], 200);

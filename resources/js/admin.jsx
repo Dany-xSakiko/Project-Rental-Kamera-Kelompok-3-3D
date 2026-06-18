@@ -14,6 +14,8 @@ import {
     deleteCamera,
     deleteEquipment,
     updateProduct,
+    createProduct,
+    getEquipmentCategories,
 } from "./services/apiadmin";
 import {
     rp, 
@@ -28,28 +30,36 @@ import {
 const TransaksiView = () => {
     const [rentals, setRentals] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [updatingStatus, setUpdatingStatus] = useState({});
 
-    useEffect(() => {
-        getRentals()
-        .then(({ data }) => {
-            // 🔎 INTIP STRUKTUR: Klik kanan di browser -> Inspect -> Tab Console
+    const loadRentals = async () => {
+        setLoading(true);
+        try {
+            const { data } = await getRentals();
             console.log("=== CHECK DATA API RENTALS ===", data);
             setRentals(parseRentalsResponse(data));
-            setLoading(false);
-        })
-        .catch((err) => {
+        } catch (err) {
             console.error("Gagal load API rentals:", err);
+        } finally {
             setLoading(false);
-        });
+        }
+    };
+
+    useEffect(() => {
+        loadRentals();
     }, []);
 
     const updateStatus = async (id, status) => {
+        setUpdatingStatus((prev) => ({ ...prev, [id]: true }));
         try {
             await updateRentalStatus(id, status);
-            setRentals((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
+            const { data } = await getRentals();
+            setRentals(parseRentalsResponse(data));
             alert("✅ Status berhasil diupdate!");
         } catch (err) {
             alert("❌ " + (err.response?.data?.message || err.message));
+        } finally {
+            setUpdatingStatus((prev) => ({ ...prev, [id]: false }));
         }
     };
 
@@ -94,7 +104,14 @@ const TransaksiView = () => {
                                         <select
                                             value={r.status}
                                             onChange={(e) => updateStatus(r.id, e.target.value)}
-                                            style={{ fontSize: "12px", padding: "4px 8px", borderRadius: "4px", border: "1px solid #ddd" }}
+                                            disabled={!!updatingStatus[r.id]}
+                                            style={{
+                                                fontSize: "12px",
+                                                padding: "4px 8px",
+                                                borderRadius: "4px",
+                                                border: "1px solid #ddd",
+                                                opacity: updatingStatus[r.id] ? 0.6 : 1,
+                                            }}
                                         >
                                             <option>Menunggu Pembayaran</option>
                                             <option>Aktif / Disewa</option>
@@ -206,6 +223,21 @@ function AdminApp() {
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState("");
 
+    const [productType, setProductType] = useState("camera");
+    const [equipmentCategories, setEquipmentCategories] = useState([]);
+    const [formProduct, setFormProduct] = useState({
+        name: "",
+        category: "",
+        equipmentCategoryId: "",
+        brand: "",
+        serialNumber: "",
+        stock: 1,
+        pricePerDay: "",
+        description: "",
+    });
+    const [productSubmitting, setProductSubmitting] = useState(false);
+
+
     // Fungsi untuk mengambil data kamera dari API
     const fetchCameras = async () => {
     try {
@@ -234,8 +266,86 @@ useEffect(() => {
     fetchEquipments();
 }, [isAuthenticated]);
 
+useEffect(() => {
+    if (!isAuthenticated) return;
+
+    getEquipmentCategories()
+        .then(({ data }) => {
+            const categories = Array.isArray(data) ? data : data.data || [];
+            setEquipmentCategories(categories);
+            if (categories.length && !formProduct.equipmentCategoryId) {
+                setFormProduct((prev) => ({
+                    ...prev,
+                    equipmentCategoryId: prev.equipmentCategoryId || categories[0].id,
+                }));
+            }
+        })
+        .catch((err) => {
+            console.error("Gagal load kategori equipment:", err);
+        });
+}, [isAuthenticated]);
+
+const handleFormFieldChange = (field, value) => {
+    setFormProduct((prev) => ({ ...prev, [field]: value }));
+};
+
+const resetProductForm = (type = "camera") => {
+    setProductType(type);
+    setFormProduct({
+        name: "",
+        category: "",
+        equipmentCategoryId: equipmentCategories[0]?.id || "",
+        brand: "",
+        serialNumber: "",
+        stock: 1,
+        pricePerDay: "",
+        description: "",
+    });
+};
+
+const handleSubmitNewProduct = async (e) => {
+    e.preventDefault();
+    setProductSubmitting(true);
+
+    const payload = productType === "camera"
+        ? {
+            brand: formProduct.brand.trim(),
+            serial_number: formProduct.serialNumber.trim(),
+            type: formProduct.category.trim(),
+            description: formProduct.description.trim(),
+            stock: Number(formProduct.stock),
+            price_per_day: Number(formProduct.pricePerDay),
+        }
+        : {
+            equipment_category_id: Number(formProduct.equipmentCategoryId),
+            name: formProduct.name.trim(),
+            brand: formProduct.brand.trim() || null,
+            specification: formProduct.description.trim() || null,
+            stock: Number(formProduct.stock),
+            price_per_day: Number(formProduct.pricePerDay),
+        };
+
+    try {
+        await createProduct(productType === "camera", payload);
+
+        if (productType === "camera") {
+            await fetchCameras();
+        } else {
+            await fetchEquipments();
+        }
+
+        alert(`✅ ${productType === "camera" ? "Kamera" : "Equipment"} berhasil ditambahkan!`);
+        resetProductForm(productType);
+        setActiveView("produk");
+    } catch (err) {
+        alert("❌ Gagal menambahkan barang: " + (err.response?.data?.message || err.message));
+    } finally {
+        setProductSubmitting(false);
+    }
+};
+
 // Fungsi hapus kamera dari database
-const handleDelete = async (id) => {
+const handleDelete = async (item) => {
     if (!window.confirm("Yakin hapus barang ini?")) return;
     const isCamera = isCameraItem(item);
     try {
@@ -243,7 +353,7 @@ const handleDelete = async (id) => {
             await deleteCamera(item.id);
             setCameras((prev) => prev.filter((c) => c.id !== item.id));
         } else {
-            await deleteEquipment(item.id); // ⬅️ import ini dari apiadmin.js
+            await deleteEquipment(item.id);
             setEquipments((prev) => prev.filter((e) => e.id !== item.id));
         }
         alert("✅ Barang berhasil dihapus!");
@@ -330,7 +440,7 @@ const handleEditProduct = async (item) => {
     const [stats, setStats] = useState({
         total_barang: 0,
         sedang_disewa: 0,
-        menunggu_pickup: 0,
+        menunggu_pembayaran: 0,
         pendapatan: 0,
         booking_terbaru: []
     });
@@ -352,7 +462,7 @@ const handleEditProduct = async (item) => {
                 setStats({
                     total_barang: data.total_barang || 0,
                     sedang_disewa: data.sedang_disewa || 0,
-                    menunggu_pickup: data.menunggu_pickup || 0,
+                    menunggu_pembayaran: data.menunggu_pembayaran || 0,
                     pendapatan: data.pendapatan || 0,
                     booking_terbaru: data.booking_terbaru || []
                 });
@@ -596,9 +706,9 @@ const handleEditProduct = async (item) => {
                                         📝
                                     </div>
                                     <div className="stat-info">
-                                        <h4>MENUNGGU PICKUP</h4>
+                                        <h4>MENUNGGU PEMBAYARAN</h4>
                                         <div className="num">
-                                            {loadingStats ? "..." : stats.menunggu_pickup}  
+                                            {loadingStats ? "..." : stats.menunggu_pembayaran}
                                         </div>
                                     </div>
                                 </div>
@@ -819,53 +929,138 @@ const handleEditProduct = async (item) => {
                                 >
                                     Input Data Barang Baru
                                 </h3>
-                                <form
-                                    onSubmit={(e) => {
-                                        e.preventDefault();
-                                        alert(
-                                            "Siap dihubungkan ke API Laravel!",
-                                        );
-                                        setActiveView("produk");
-                                    }}
-                                >
+                                <form onSubmit={handleSubmitNewProduct}>
                                     <div className="form-row">
                                         <div className="form-group">
-                                            <label>Nama Kamera / Alat</label>
-                                            <input type="text" required />
-                                        </div>
-                                        <div className="form-group">
-                                            <label>Kategori</label>
-                                            <select>
-                                                <option>Mirrorless</option>
-                                                <option>DSLR</option>
-                                                <option>Lensa</option>
-                                                <option>Aksesoris</option>
+                                            <label>Jenis Barang</label>
+                                            <select
+                                                value={productType}
+                                                onChange={(e) => {
+                                                    const nextType = e.target.value;
+                                                    setProductType(nextType);
+                                                    resetProductForm(nextType);
+                                                }}
+                                            >
+                                                <option value="camera">Kamera</option>
+                                                <option value="equipment">Equipment</option>
                                             </select>
                                         </div>
                                     </div>
-                                    <div className="form-row">
-                                        <div className="form-group">
-                                            <label>Brand Merk</label>
-                                            <input type="text" />
-                                        </div>
-                                        <div className="form-group">
-                                            <label>Total Stok Alat</label>
-                                            <input
-                                                type="number"
-                                                defaultValue="1"
-                                                required
-                                            />
-                                        </div>
-                                    </div>
+
+                                    {productType === "camera" ? (
+                                        <>
+                                            <div className="form-row">
+                                                <div className="form-group">
+                                                    <label>Brand Merk</label>
+                                                    <input
+                                                        type="text"
+                                                        required
+                                                        value={formProduct.brand}
+                                                        onChange={(e) => handleFormFieldChange("brand", e.target.value)}
+                                                    />
+                                                </div>
+                                                <div className="form-group">
+                                                    <label>Serial Number</label>
+                                                    <input
+                                                        type="text"
+                                                        required
+                                                        value={formProduct.serialNumber}
+                                                        onChange={(e) => handleFormFieldChange("serialNumber", e.target.value)}
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div className="form-row">
+                                                <div className="form-group">
+                                                    <label>Kategori</label>
+                                                    <input
+                                                        type="text"
+                                                        value={formProduct.category}
+                                                        onChange={(e) => handleFormFieldChange("category", e.target.value)}
+                                                        placeholder="Mirrorless, DSLR, dsb"
+                                                    />
+                                                </div>
+                                                <div className="form-group">
+                                                    <label>Total Stok Alat</label>
+                                                    <input
+                                                        type="number"
+                                                        min="0"
+                                                        required
+                                                        value={formProduct.stock}
+                                                        onChange={(e) => handleFormFieldChange("stock", e.target.value)}
+                                                    />
+                                                </div>
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <div className="form-row">
+                                                <div className="form-group">
+                                                    <label>Nama Equipment</label>
+                                                    <input
+                                                        type="text"
+                                                        required
+                                                        value={formProduct.name}
+                                                        onChange={(e) => handleFormFieldChange("name", e.target.value)}
+                                                    />
+                                                </div>
+                                                <div className="form-group">
+                                                    <label>Kategori Equipment</label>
+                                                    <select
+                                                        required
+                                                        value={formProduct.equipmentCategoryId}
+                                                        onChange={(e) => handleFormFieldChange("equipmentCategoryId", e.target.value)}
+                                                    >
+                                                        <option value="">Pilih kategori</option>
+                                                        {equipmentCategories.map((category) => (
+                                                            <option key={category.id} value={category.id}>
+                                                                {category.name}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            <div className="form-row">
+                                                <div className="form-group">
+                                                    <label>Brand Merk</label>
+                                                    <input
+                                                        type="text"
+                                                        value={formProduct.brand}
+                                                        onChange={(e) => handleFormFieldChange("brand", e.target.value)}
+                                                    />
+                                                </div>
+                                                <div className="form-group">
+                                                    <label>Total Stok Alat</label>
+                                                    <input
+                                                        type="number"
+                                                        min="0"
+                                                        required
+                                                        value={formProduct.stock}
+                                                        onChange={(e) => handleFormFieldChange("stock", e.target.value)}
+                                                    />
+                                                </div>
+                                            </div>
+                                        </>
+                                    )}
+
                                     <div className="form-row">
                                         <div className="form-group">
                                             <label>Harga Sewa (Per Hari)</label>
-                                            <input type="number" required />
+                                            <input
+                                                type="number"
+                                                min="0"
+                                                required
+                                                value={formProduct.pricePerDay}
+                                                onChange={(e) => handleFormFieldChange("pricePerDay", e.target.value)}
+                                            />
                                         </div>
                                     </div>
                                     <div className="form-group">
                                         <label>Deskripsi Singkat</label>
-                                        <textarea rows="4"></textarea>
+                                        <textarea
+                                            rows="4"
+                                            value={formProduct.description}
+                                            onChange={(e) => handleFormFieldChange("description", e.target.value)}
+                                        ></textarea>
                                     </div>
                                     <div
                                         style={{
@@ -877,15 +1072,17 @@ const handleEditProduct = async (item) => {
                                         <button
                                             type="submit"
                                             className="btn btn-gold"
+                                            disabled={productSubmitting}
                                         >
-                                            Simpan Data Barang
+                                            {productSubmitting ? "Menyimpan..." : "Simpan Data Barang"}
                                         </button>
                                         <button
                                             type="button"
                                             className="btn btn-outline"
-                                            onClick={() =>
-                                                setActiveView("produk")
-                                            }
+                                            onClick={() => {
+                                                resetProductForm(productType);
+                                                setActiveView("produk");
+                                            }}
                                         >
                                             Batal
                                         </button>

@@ -38,6 +38,10 @@ export const updateRentalStatus = (id, status) =>
         { headers: authHeaders() }
     );
 
+// Hapus rental (dipakai oleh admin)
+export const deleteRental = (id) =>
+    axios.delete(`${API_BASE}/rentals/${id}`, { headers: authHeaders() });
+
 // ============================================================
 // PELANGGAN / USERS
 // ============================================================
@@ -66,6 +70,10 @@ export const deleteCamera = (id) =>
 // tambahkan deleteEquipment, sebelumnya tidak ada!
 export const deleteEquipment = (id) =>
     axios.delete(`${API_BASE}/equipments/${id}`, { headers: authHeaders() });
+
+// Ambil daftar kategori equipment (dipakai oleh form admin)
+export const getEquipmentCategories = () =>
+    axios.get(`${API_BASE}/equipment-categories`, { headers: authHeaders() });
 
 export const updateProduct = (id, isCamera, payload) => {
     const endpoint = isCamera
