@@ -672,6 +672,7 @@ const AuthPage = ({ setUser, setActivePage }) => {
                 initials: data.user.name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2),
             };
             localStorage.setItem("token", data.token);
+            localStorage.removeItem("cart"); 
             localStorage.setItem("user", JSON.stringify(userData)); // ✅ BARU
             setUser(userData);
             setActivePage("home");
@@ -690,6 +691,7 @@ const AuthPage = ({ setUser, setActivePage }) => {
                 initials: data.user.name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2),
             };
             localStorage.setItem("token", data.token);
+            localStorage.removeItem("cart"); 
             localStorage.setItem("user", JSON.stringify(userData));
             setUser(userData);
             alert("🎉 Akun berhasil dibuat!");
