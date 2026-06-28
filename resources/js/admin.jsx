@@ -486,16 +486,21 @@ const handleEditProduct = async (item) => {
                 // Tembak API login backend
                 const { data } = await loginAdmin(email, password);
                 
+                // Bersihkan sisa session customer agar tidak bocor
+                localStorage.removeItem("token");
+                localStorage.removeItem("user");
+                localStorage.removeItem("cart");
+
                 // Simpan token asli dari database dan set status login
-                localStorage.setItem("token", data.token);
+                localStorage.setItem("adminAuthToken", data.token);
                 localStorage.setItem("adminToken", "true");
                 localStorage.setItem("adminName", data.user?.name || data.name || "Admin");  
                 localStorage.setItem("adminEmail", data.user?.email || data.email || "");
-                setAdminUser({                                          // ⬅️ tambah ini
+                setAdminUser({                                   
                     name: data.user?.name || data.name || "Admin",
                     email: data.user?.email || data.email || "",
                 }); 
-                console.log("TOKEN SETELAH DISIMPAN:", localStorage.getItem("token")); 
+                console.log("TOKEN SETELAH DISIMPAN:", localStorage.getItem("adminAuthToken"));
                 setIsAuthenticated(true);
                 
                 alert("✅ Login Admin Berhasil!");

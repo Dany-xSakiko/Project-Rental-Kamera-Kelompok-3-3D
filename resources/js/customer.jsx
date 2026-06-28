@@ -656,15 +656,30 @@ const AuthPage = ({ setUser, setActivePage }) => {
 
     try {
         if (isLogin) {
-            // Cek admin dulu
-            if (email === "admin@yukirent.com" && password === "admin123") {
+            // Melakukan permintaan login pengguna ke server
+            const { data } = await postLogin({ email, password });
+
+            // Kalau ternyata yang login adalah admin, arahkan ke halaman admin 
+            if (data.user?.role === "admin") {                  
+                // Bersihkan dulu sisa token customer              
+                localStorage.removeItem("token");                  
+                localStorage.removeItem("user");               
+                localStorage.removeItem("cart");                  
+                // Set session admin                               
+                localStorage.setItem("adminAuthToken", data.token);
+                localStorage.setItem("adminToken", "true");      
+                localStorage.setItem("adminName", data.user.name);
+                localStorage.setItem("adminEmail", data.user.email);
                 alert("✦ Berhasil login sebagai Admin. Mengalihkan ke Dashboard...");
                 window.location.href = "/admin";
                 return;
             }
 
-            // Melakukan permintaan login pengguna ke server
-            const { data } = await postLogin({ email, password });
+            // Bersihkan sisa session admin agar tidak bocor ke customer 
+            localStorage.removeItem("adminAuthToken");              
+            localStorage.removeItem("adminToken");                 
+            localStorage.removeItem("adminName");                 
+            localStorage.removeItem("adminEmail");            
 
             const userData = {
                 name:     data.user.name,
@@ -673,7 +688,7 @@ const AuthPage = ({ setUser, setActivePage }) => {
             };
             localStorage.setItem("token", data.token);
             localStorage.removeItem("cart"); 
-            localStorage.setItem("user", JSON.stringify(userData)); // ✅ BARU
+            localStorage.setItem("user", JSON.stringify(userData)); 
             setUser(userData);
             setActivePage("home");
 
@@ -682,6 +697,7 @@ const AuthPage = ({ setUser, setActivePage }) => {
             const phone                 = e.target.phone.value.trim();
             const password_confirmation = e.target.password.value;
 
+            
             // Melakukan permintaan registrasi pengguna ke server
             const { data } = await postRegister({ name, email, password, password_confirmation, phone });
 
@@ -885,6 +901,11 @@ const ProfilePage = ({ user, setUser, setActivePage }) => {
                                 localStorage.removeItem("token");
                                 localStorage.removeItem("user");
                                 localStorage.removeItem("cart");
+                                // Bersihkan juga sisa session admin jika ada 
+                                localStorage.removeItem("adminAuthToken"); 
+                                localStorage.removeItem("adminToken");     
+                                localStorage.removeItem("adminName");      
+                                localStorage.removeItem("adminEmail");     
                                 setUser(null);
                                 setActivePage("home");
                             }}

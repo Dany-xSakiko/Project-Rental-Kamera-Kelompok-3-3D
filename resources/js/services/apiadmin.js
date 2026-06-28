@@ -1,32 +1,24 @@
 import axios from "axios";
 
-// ============================================================
 // BASE CONFIG
-// ============================================================
 const API_BASE = "/api";
 
 // authHeaders() adalah fungsi, 
 //    jadi token dibaca fresh setiap kali dipanggil
 const authHeaders = () => ({
-    Authorization: "Bearer " + localStorage.getItem("token"),
+    Authorization: "Bearer " + localStorage.getItem("adminAuthToken") || localStorage.getItem("token")
 });
 
-// ============================================================
 // AUTH
-// ============================================================
 export const loginAdmin = (email, password) =>
     axios.post(`${API_BASE}/admin/login`, { email, password });
 
-// ============================================================
 // DASHBOARD
-// ============================================================
 export const getDashboardStats = () =>
     axios.get(`${API_BASE}/admin/dashboard-stats`, 
         { headers: authHeaders() });
 
-// ============================================================
 // RENTALS / TRANSAKSI
-// ============================================================
 export const getRentals = () =>
     axios.get(`${API_BASE}/admin/rentals`, 
         { headers: authHeaders() });
@@ -42,16 +34,12 @@ export const updateRentalStatus = (id, status) =>
 export const deleteRental = (id) =>
     axios.delete(`${API_BASE}/rentals/${id}`, { headers: authHeaders() });
 
-// ============================================================
 // PELANGGAN / USERS
-// ============================================================
 export const getPelanggan = () =>
     axios.get(`${API_BASE}/admin/pelanggan`, 
         { headers: authHeaders() });
 
-// ============================================================
 // PRODUK: CAMERAS & EQUIPMENTS
-// ============================================================
 export const getCameras = (keyword = "") =>
     axios.get(`${API_BASE}/cameras`, {
         params: keyword ? { search: keyword } : {},
