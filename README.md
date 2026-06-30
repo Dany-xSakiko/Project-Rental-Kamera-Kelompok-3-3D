@@ -1,9 +1,9 @@
 "# Rental Kamera - Kelompok 3" 
-- Achmaddany Rozaqy (UI Design, Lead, Frontend, Backend)
-- Rahmat Nuril Mustofa (Co-lead, Backend, database engineering)
-- Muhammad Rizky Abdillah (Backend)
-- M. Fanny Dimas Efendi (Frontend)
--
+- Achmaddany Rozaqy | NPM: 2313020033 (UI Design, Lead, Frontend, Backend)
+- Rahmat Nuril Mustofa | NPM: 2313020190 (Co-lead, Backend, database engineering)
+- Muhammad Rizky Abdillah | NPM: 2313020176 (Backend)
+- M. Fanny Dimas Efendi | NPM: 2313020282(Frontend)
+- Hamdani Syahdan Maulana | ?
 
 # Yukirent Cam ✦
 **Sistem Manajemen Penyewaan Kamera & Peralatan Profesional**
